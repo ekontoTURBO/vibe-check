@@ -1,18 +1,59 @@
 # Vibe Check
 
-> An anti-vibe-coding mentor for VS Code and Google Antigravity. When AI writes code for you, Vibe Check makes sure you actually understand it.
+> **Anti-vibe-coding mentor.** When AI writes code for you, Vibe Check turns it into a Duolingo-style quiz so you actually understand it.
 
-Inspired by Duolingo's mastery loops and Brilliant's interactive learning, Vibe Check turns AI-generated code into structured, gated learning modules — complete with spaced repetition, three difficulty tracks, and an XP/streak system.
+Inspired by Duolingo's mastery loops and Brilliant's interactive learning, Vibe Check intercepts large AI-generated code insertions and turns them into structured, gated learning modules — complete with spaced repetition, three difficulty tracks, and an XP/streak system.
+
+Built for **Google Antigravity, Cursor, Windsurf, VSCodium, VS Code**, and any other VS Code-compatible editor.
 
 ---
 
-## How it works
+## Why?
 
-1. **Vibe Check watches your editor.** When an AI agent (or you) inserts a large chunk of code, the **Pulse Observer** flags it.
-2. **A module is generated.** Five sequential lessons are created from the code (or any other topic — see below). Only the first lesson is unlocked.
-3. **You take a lesson.** Five closed questions per lesson — multiple choice and code-ordering puzzles. No free-text gotchas.
-4. **Pass to unlock.** Get **≥80% (4/5 correct)** to mark a lesson complete and unlock the next one.
-5. **Spaced repetition kicks in.** Questions you answered are scheduled for review using the **FSRS** algorithm. Daily streaks and XP track your retention.
+You ship code an agent wrote. A week later, it breaks. You can't fix it because you never understood it. Vibe Check makes that impossible.
+
+- An agent inserts >5 lines? **A 5-lesson module spawns automatically.**
+- You read each line, then prove it with closed-question quizzes.
+- Pass 4/5 to unlock the next lesson. Fail and you stay stuck — or skip with a streak hit.
+- Questions you answered live in a spaced-repetition queue. Tomorrow Vibe Check asks you the trickiest ones again.
+
+No fluff, no free-text gotchas, no LLM grading you on vibes. Closed questions, deterministic grading, pixel-art mascot judging your every wrong answer.
+
+---
+
+## Install
+
+### Antigravity / Cursor / Windsurf / VSCodium
+
+Open the Extensions panel, search **Vibe Check**, click Install.
+
+### VS Code
+
+Vibe Check is published to [Open VSX](https://open-vsx.org/), not Microsoft's Marketplace. To install in the official VS Code:
+
+1. Download the latest `.vsix` from the [Open VSX page](https://open-vsx.org/extension/eryk-czekalski/vibe-check)
+2. In VS Code: **Extensions panel → "..." menu → Install from VSIX...** → pick the file
+
+Or via terminal:
+
+```bash
+code --install-extension vibe-check-X.Y.Z.vsix
+```
+
+---
+
+## Quick start
+
+1. **Open the sidebar.** Click the 🎓 mortarboard icon in the activity bar.
+2. **Set your model provider.** Out of the box, Vibe Check tries to use GitHub Copilot (in VS Code) or Antigravity AI (in Antigravity). To use **Anthropic / OpenAI / Gemini / OpenRouter** directly:
+   - **`Ctrl/Cmd+Shift+P`** → `Vibe Check: Set API Key…` → pick provider → paste key
+   - **`Ctrl/Cmd+Shift+P`** → `Vibe Check: Switch Provider…` → pick the one you set
+   - **`Ctrl/Cmd+Shift+P`** → `Vibe Check: Select Model…` → pick a model from the live list
+3. **Trigger a quiz.** Either let an AI agent insert >5 lines into your editor (the Pulse Observer auto-fires), or:
+   - Click **+ NEW** in the sidebar header → pick a topic
+   - Right-click code → **Vibe Check: Quiz Me On Selection**
+4. **Take the lesson.** Five questions. Pass with ≥80% to unlock the next.
+5. **Daily review.** Click **↻ START DUE REVIEW** when the button shows due cards.
 
 ---
 
@@ -23,61 +64,54 @@ Inspired by Duolingo's mastery loops and Brilliant's interactive learning, Vibe 
 | Topic | Source | Use it for |
 |---|---|---|
 | 📝 **Code** | Active editor selection or full file | Quizzing on code an agent just wrote |
-| 🏗️ **Infrastructure** | `package.json`, `tsconfig.json`, `eslint.config`, build configs, Dockerfile, CI workflows | Understanding the build/config layer |
-| 🛠️ **Tools** | `package.json` deps & scripts | Knowing what each library does and why |
+| 🏗️ **Infrastructure** | `package.json`, `tsconfig.json`, eslint config, build configs, Dockerfile, CI workflows | Understanding the build/config layer |
+| 🛠️ **Tools** | `package.json` deps & scripts | Knowing what each library does |
 | 🧱 **Architecture** | Project directory tree | Understanding module boundaries |
 | 🔐 **Security** | Active file (or project config) | Spotting injection vectors, validation gaps |
 
 ### Three difficulty tracks
 
-Pick at the top of the sidebar:
 - **Beginner** — recognition and recall (5 XP per correct answer)
 - **Intermediate** — applied logic, predict outputs (10 XP)
 - **Expert** — architecture, edge cases, trade-offs (20 XP)
 
-Each track has its own streak, XP, modules, and review queue. Switch freely.
+Each track has its own modules, streak, XP, and review queue. Switch freely.
 
-### Closed-question types
+### Question types
 
 - **Multiple choice** — one prompt, four plausible options, one correct
-- **Code ordering** — shuffled lines you reorder by tapping (great for control flow, async/await, lifecycle)
+- **Code ordering** — shuffled lines you reorder via up/down arrows
 
-### Personalized wrong-answer feedback
+### Smart editor integration
 
-When you answer wrong, the LLM analyzes *your specific choice* and explains why it's incorrect — not a canned definition. Then you get **↻ Try Again** or **Skip**.
+- **📍 SHOW** button on each code block opens the source file and highlights the referenced lines.
+- **Backtick code references in prompts** are clickable. When the LLM writes a question like *"What does `Map.get(key)` return when…"*, click `Map.get(key)` and Vibe Check finds and highlights that exact text in your source.
+- **Auto-glow** highlights the relevant code passively as you advance through a lesson.
 
-### Editor integration
+### Optional personalized feedback
 
-- **📍 Show in editor** button on each question opens the source file and glows the referenced lines
-- **Auto-glow** highlights the relevant code passively as you advance through a lesson (won't steal focus)
-- Cross-device sync via `globalState.setKeysForSync` — your XP and progress follow you
+Got a question wrong? The default explanation is canonical and free. Click **? WHY** to ask the LLM for a personalized explanation that points at *your specific mistake*. Skip it and pay nothing.
 
-### Module path UI
+### XP, streaks, daily ring
 
-Lessons render as a vertical Duolingo-style path:
-- 🔒 **Locked** — earn it
-- ⭐ **Available** — pulsing gold ring
-- ✓ **Completed** — green node, click to retake
-
-Connector lines turn green as you advance.
+- Daily XP ring fills toward a 50-XP goal — work a little every day.
+- Per-track streak counts consecutive days you answered ≥1 question correctly.
+- Cross-device sync via VS Code Settings Sync — your XP follows you.
 
 ---
 
-## Requirements
+## Supported AI providers
 
-### To run
+| Provider | Set up | Best for |
+|---|---|---|
+| **GitHub Copilot** (`vscode.lm`) | Just sign into Copilot in VS Code | Free if you have Copilot |
+| **Antigravity AI** | Auto-detected when running in Antigravity | Free in-host |
+| **Anthropic Claude** | Get a key at [console.anthropic.com](https://console.anthropic.com/settings/keys) | Best educational explanations |
+| **Google Gemini** | Get a key at [aistudio.google.com](https://aistudio.google.com/app/apikey) | Cheapest at scale |
+| **OpenAI** | Get a key at [platform.openai.com](https://platform.openai.com/api-keys) | Most familiar |
+| **OpenRouter** | Get a key at [openrouter.ai](https://openrouter.ai/keys) | One key, 100+ models |
 
-- **VS Code 1.116+** or **Google Antigravity**
-- An LLM:
-  - **VS Code**: GitHub Copilot subscription (uses `vscode.lm` chat API; defaults to **GPT-4o**, falls back to any Copilot model)
-  - **Antigravity**: built-in `antigravity.ai` API (uses **gemini-3-flash**)
-- A workspace folder open (most topics need one; the Code topic only needs an open file)
-
-### To develop
-
-- Node.js 22+
-- `npm install` in the project root
-- Press **F5** to launch the Extension Development Host (configured to open this project as the test workspace)
+API keys are stored encrypted in VS Code SecretStorage — they never sync to Settings Sync, never end up in `settings.json`. Set, clear, and rotate them via the command palette.
 
 ---
 
@@ -85,104 +119,50 @@ Connector lines turn green as you advance.
 
 | Command | Description |
 |---|---|
-| `Vibe Check: New Module...` | Pick a topic and generate a fresh 5-lesson module |
+| `Vibe Check: New Module...` | Open the topic picker to generate a fresh 5-lesson module |
 | `Vibe Check: Quiz Me On Selection` | Generate a code module from your current editor selection |
 | `Vibe Check: Start Due Review` | Run FSRS-due questions on the active track |
-| `Vibe Check: Switch Track` | Change between beginner/intermediate/expert |
+| `Vibe Check: Switch Track` | Change between beginner / intermediate / expert |
 | `Vibe Check: Reset Progress` | Wipe all XP, streaks, modules, and FSRS cards |
-
-The **mortarboard 🎓 icon** in the activity bar opens the sidebar.
-
----
-
-## Architecture
-
-```
-src/
-├── extension.ts            Activation + command wiring + pulse handler
-├── EnvironmentDetector.ts  VS Code vs Antigravity detection
-├── LLMService.ts           Unified wrapper over vscode.lm + antigravity.ai
-├── PulseObserver.ts        Watches for large AI-style insertions; hooks Antigravity AgentArtifact events
-├── ContextGatherer.ts      Topic-specific source assembly (code, package.json, dir tree, etc.)
-├── TeacherProvider.ts      Two-stage LLM prompts: module skeleton → on-demand lesson questions
-├── FSRSManager.ts          ts-fsrs scheduler + per-track XP, streaks, lesson lock/unlock
-├── SidebarView.ts          Webview UI: track tabs, module path, MC + code-order rendering
-└── types.ts                Shared types (Module, ModuleLesson, Question union, messages)
-```
-
-**Key decisions:**
-- **Lazy lesson generation** — module skeletons cost ~500 tokens, full question sets generate only when you click into a lesson. No wasted LLM calls on lessons you'll never reach.
-- **Closed questions only** — answers grade deterministically (no LLM grading call per submit), making the loop fast and cheap.
-- **Pass threshold 80%** — Duolingo-style mastery gate. Below that, the lesson stays available, you retry the same questions.
-- **First-attempt grading happens on finalize** — clicking "Try Again" doesn't pollute the FSRS record. Only "Next" (after correct) or "Skip" (after wrong) writes to the spaced repetition store.
+| `Vibe Check: Switch Provider...` | Change which LLM backend Vibe Check uses |
+| `Vibe Check: Select Model...` | Pick a specific model from the active provider's catalog |
+| `Vibe Check: Set API Key...` | Save an API key for a direct provider (encrypted) |
+| `Vibe Check: Clear API Key...` | Wipe a stored API key |
 
 ---
 
-## Storage
+## Settings
 
-All progress lives in `extensionContext.globalState` (synced across devices via VS Code Settings Sync):
+| Setting | Default | What it does |
+|---|---|---|
+| `vibeCheck.autoQuiz` | `true` | Auto-fire a quiz when the Pulse Observer detects a large AI insertion |
+| `vibeCheck.modelProvider` | `auto` | Which backend to use (`copilot`, `antigravity`, `anthropic`, `gemini`, `openai`, `openrouter`, or `auto`) |
+| `vibeCheck.<provider>Model` | `""` | Per-provider model override — leave empty for sensible defaults |
 
-- `vibeCheck.modules.v3` — your modules and their lesson states
-- `vibeCheck.cards.v3` — FSRS card data (due dates, stability, etc.)
-- `vibeCheck.progress.v3` — XP, streaks, active track per track
-
-Reset with `Vibe Check: Reset Progress`.
+Open the Settings UI and search "vibe check" to see them all with descriptions.
 
 ---
 
-## Configuration
+## Privacy
 
-The default model for VS Code is **GPT-4o** via Copilot. To change it (e.g. to Claude Sonnet via Copilot, or remove the family filter entirely), edit [`src/LLMService.ts`](src/LLMService.ts):
-
-```ts
-const models = await lm.selectChatModels({
-  vendor: 'copilot',
-  family: 'gpt-4o',  // ← change me
-});
-```
-
-For Antigravity, the model is `gemini-3-flash` — change the string in `LLMService.callAntigravity`.
+- API keys are stored in **VS Code SecretStorage** (encrypted, never synced).
+- Code context sent to LLMs is bounded: 5 KB per file, 16 KB total per generation.
+- All telemetry is **local-only**. Your XP, streaks, and modules live in `globalState`. Nothing is sent to a Vibe Check server because there is no Vibe Check server.
 
 ---
 
 ## Known limitations
 
-- **Pulse heuristic is coarse**: any insertion ≥200 chars or ≥5 lines triggers a module (debounced 350ms, with a 30-second cooldown between modules). Large pastes from outside an AI agent will also trigger.
-- **Antigravity hooks are speculative**: `antigravity.agent.onArtifact` is probed defensively. If the API surface changes, the agent-plan integration is a graceful no-op.
-- **`code-order` requires unique lines**: questions with duplicate lines are filtered during generation. The LLM is instructed to keep them unique.
-- **No retry-yet-still-counted-correct nuance**: get it right on retry → full XP. Skip → 0 XP. Pure first-try-only scoring isn't tracked separately.
-
----
-
-## Development
-
-```bash
-npm install
-npm run watch       # esbuild + tsc in parallel watch mode
-# Press F5 to launch Extension Development Host
-```
-
-Other scripts:
-- `npm run compile` — one-shot bundle + type-check + lint
-- `npm run package` — production bundle
-- `npm run lint` — eslint
-- `npm run check-types` — tsc --noEmit
-
----
-
-## Tech stack
-
-- **TypeScript 5.9** strict mode
-- **esbuild** for bundling (~90 KB output)
-- **[ts-fsrs](https://github.com/open-spaced-repetition/ts-fsrs) 5.3** for spaced repetition (Free Spaced Repetition Scheduler)
-- **`vscode.lm`** chat API + Webview API
-- No runtime dependencies beyond `ts-fsrs` — everything else is dev tooling
+- **Pulse heuristic is coarse.** Any insertion ≥200 chars or ≥5 lines triggers a module. Large pastes from non-AI sources also trigger.
+- **Antigravity agent-artifact hook is speculative.** Probed defensively; falls back to text-change detection if the API surface changes.
+- **Code-order questions need unique lines.** Duplicate lines get filtered during generation; rare but possible to lose a question to this.
+- **Custom OpenAI-compatible endpoints aren't yet exposed in settings.** Want Ollama/LM Studio/local? See [DEVELOPMENT.md](DEVELOPMENT.md) for the one-line workaround.
 
 ---
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
 
 ---
 
