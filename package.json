@@ -2,7 +2,7 @@
   "name": "vibe-check",
   "displayName": "Vibe Check",
   "description": "Anti-vibe-coding mentor. When AI writes code for you, Vibe Check turns it into a Duolingo-style quiz so you actually understand it.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "cognitra",
   "license": "MIT",
   "icon": "media/icon.png",

@@ -4,6 +4,11 @@ All notable changes to Vibe Check are documented here.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.3]
+
+### Security
+- **Gemini provider now sends the API key in the `x-goog-api-key` header** instead of the `?key=...` URL query parameter. URL-based auth could end up in HTTP proxy logs and Node fetch error messages. Header-based auth doesn't. Affects only the Gemini direct provider; Anthropic / OpenAI / OpenRouter were always header-based. **If you used Gemini in v0.0.1 or v0.0.2 from a network with a logging proxy**, consider rotating your Gemini API key as a precaution.
+
 ## [0.0.2]
 
 ### Added

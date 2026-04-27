@@ -31,11 +31,16 @@ export class GeminiProvider implements LLMProvider {
 				temperature: 0.7,
 			},
 		};
+		// Use header-based auth (`x-goog-api-key`) instead of `?key=...` to keep the
+		// API key out of URLs — URLs end up in proxy logs and Node fetch error messages.
 		const res = await fetch(
-			`${API}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+			`${API}/models/${encodeURIComponent(model)}:generateContent`,
 			{
 				method: 'POST',
-				headers: { 'content-type': 'application/json' },
+				headers: {
+					'content-type': 'application/json',
+					'x-goog-api-key': key,
+				},
 				body: JSON.stringify(body),
 				signal: opts?.signal,
 			}
@@ -62,7 +67,9 @@ export class GeminiProvider implements LLMProvider {
 		if (!key) {
 			return this.curatedModels();
 		}
-		const res = await fetch(`${API}/models?key=${encodeURIComponent(key)}&pageSize=200`);
+		const res = await fetch(`${API}/models?pageSize=200`, {
+			headers: { 'x-goog-api-key': key },
+		});
 		if (!res.ok) {
 			throw new Error(`Gemini /models ${res.status}`);
 		}
