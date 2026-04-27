@@ -23,30 +23,44 @@ const esbuildProblemMatcherPlugin = {
 	},
 };
 
+/** @type {import('esbuild').BuildOptions} */
+const extensionOptions = {
+	entryPoints: ['src/extension.ts'],
+	bundle: true,
+	format: 'cjs',
+	minify: production,
+	sourcemap: !production,
+	sourcesContent: false,
+	platform: 'node',
+	outfile: 'dist/extension.js',
+	external: ['vscode'],
+	logLevel: 'silent',
+	plugins: [esbuildProblemMatcherPlugin],
+};
+
+/** @type {import('esbuild').BuildOptions} */
+const webviewOptions = {
+	entryPoints: ['src/webview/index.ts'],
+	bundle: true,
+	format: 'iife',
+	minify: production,
+	sourcemap: !production,
+	sourcesContent: false,
+	platform: 'browser',
+	target: ['es2020'],
+	outfile: 'media/sidebar.js',
+	logLevel: 'silent',
+	plugins: [esbuildProblemMatcherPlugin],
+};
+
 async function main() {
-	const ctx = await esbuild.context({
-		entryPoints: [
-			'src/extension.ts'
-		],
-		bundle: true,
-		format: 'cjs',
-		minify: production,
-		sourcemap: !production,
-		sourcesContent: false,
-		platform: 'node',
-		outfile: 'dist/extension.js',
-		external: ['vscode'],
-		logLevel: 'silent',
-		plugins: [
-			/* add to the end of plugins array */
-			esbuildProblemMatcherPlugin,
-		],
-	});
+	const ctxExt = await esbuild.context(extensionOptions);
+	const ctxWeb = await esbuild.context(webviewOptions);
 	if (watch) {
-		await ctx.watch();
+		await Promise.all([ctxExt.watch(), ctxWeb.watch()]);
 	} else {
-		await ctx.rebuild();
-		await ctx.dispose();
+		await Promise.all([ctxExt.rebuild(), ctxWeb.rebuild()]);
+		await Promise.all([ctxExt.dispose(), ctxWeb.dispose()]);
 	}
 }
 

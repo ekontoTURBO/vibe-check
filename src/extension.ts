@@ -4,10 +4,13 @@ import { LLMService } from './LLMService';
 import { TeacherProvider } from './TeacherProvider';
 import { FSRSManager } from './FSRSManager';
 import { PulseObserver, PulseEvent } from './PulseObserver';
-import { SidebarView, GradeResult } from './SidebarView';
+import { SidebarView } from './SidebarView';
 import { ContextGatherer } from './ContextGatherer';
+import { ProviderSecrets } from './providers/secrets';
+import { ProviderRegistry } from './providers/registry';
+import { registerProviderCommands } from './providers/commands';
+import { PROVIDER_LABELS } from './providers/types';
 import {
-	AnswerPayload,
 	Question,
 	QuizSession,
 	Topic,
@@ -22,7 +25,21 @@ export function activate(context: vscode.ExtensionContext) {
 	const env = EnvironmentDetector.detect();
 	console.log(`[VibeCheck] Activated in ${env}`);
 
-	const llm = new LLMService();
+	const secrets = new ProviderSecrets(context);
+	const registry = new ProviderRegistry(secrets);
+	registerProviderCommands(context, registry);
+
+	// One-time migration of plain-text api keys (if any) into SecretStorage.
+	void (async () => {
+		const { migrated } = await secrets.migrateFromSettings();
+		if (migrated.length > 0) {
+			vscode.window.showInformationMessage(
+				`Vibe Check: moved ${migrated.length} API key${migrated.length > 1 ? 's' : ''} into encrypted SecretStorage (${migrated.map((id) => PROVIDER_LABELS[id]).join(', ')}). Plain-settings entries cleared.`
+			);
+		}
+	})();
+
+	const llm = new LLMService(registry);
 	const teacher = new TeacherProvider(llm);
 	const fsrs = new FSRSManager(context);
 	const pulse = new PulseObserver();
@@ -51,7 +68,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		const track = fsrs.getProgress().activeTrack;
 		inFlight = true;
-		sidebar.setGenerating(true, topic, track);
+		sidebar.setGenerating(true, topic);
 
 		try {
 			const ctx = await gatherer.gather(topic, opts);
@@ -65,7 +82,7 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 			fsrs.addModule(module);
 			lastModuleAt = Date.now();
-			sidebar.refresh();
+			sidebar.openModule(module.id);
 			vscode.window.showInformationMessage(
 				`Vibe Check: created module "${module.title}" with 5 lessons.`
 			);
@@ -105,10 +122,9 @@ export function activate(context: vscode.ExtensionContext) {
 			return null;
 		}
 
-		// Generate questions if missing
 		let questions = lesson.questions;
 		if (!questions || questions.length === 0) {
-			sidebar.setGenerating(true, module.topic, module.track);
+			sidebar.setGenerating(true, module.topic);
 			try {
 				questions = await teacher.generateLessonQuestions(module, lesson);
 				fsrs.saveLessonQuestions(module.id, lesson.id, questions);
@@ -167,31 +183,18 @@ export function activate(context: vscode.ExtensionContext) {
 		);
 	});
 
-	// Submit just checks correctness + (if wrong) generates personalized explanation.
-	// FSRS grading + XP credit happen on finalize (Next / Skip).
-	sidebar.setGradeHandler(async (questionId, answer): Promise<GradeResult> => {
+	sidebar.setWrongFeedbackHandler(async (questionId, userAnswerText) => {
 		const session = sidebar.currentSession();
 		const q = session?.questions.find((qq) => qq.id === questionId);
 		if (!q) {
-			return { correct: false, explanation: 'Question expired.', xpDelta: 0, correctAnswer: '' };
+			return 'Question expired.';
 		}
-		const correct = isAnswerCorrect(q, answer);
-		const correctAnswerText = describeCorrectAnswer(q);
-		let explanation = q.explanation;
-		if (!correct) {
-			try {
-				explanation = await teacher.explainWrongAnswer(
-					q,
-					describeUserAnswer(q, answer),
-					correctAnswerText
-				);
-			} catch (err) {
-				console.error('[VibeCheck] Personalized explanation failed:', err);
-				// Fall back to canonical explanation
-			}
+		try {
+			return await teacher.explainWrongAnswer(q, userAnswerText, describeCorrectAnswer(q));
+		} catch (err) {
+			console.error('[VibeCheck] Personalized explanation failed:', err);
+			return q.explanation;
 		}
-		const xpDelta = correct ? trackXp(q.track) : 0;
-		return { correct, explanation, xpDelta, correctAnswer: correctAnswerText };
 	});
 
 	sidebar.setFinalizeHandler(async (questionId, outcome) => {
@@ -208,6 +211,30 @@ export function activate(context: vscode.ExtensionContext) {
 		if (ev.insertedText.trim().length < 40) {
 			return;
 		}
+
+		const lineCount = ev.insertedText.split('\n').length;
+		const charCount = ev.insertedText.length;
+		sidebar.notifyPulse({ chars: charCount, lines: lineCount });
+
+		const cfg = vscode.workspace.getConfiguration('vibeCheck');
+		const autoQuiz = cfg.get<boolean>('autoQuiz', true);
+
+		if (!autoQuiz) {
+			const choice = await vscode.window.showInformationMessage(
+				`Vibe Check: AI just inserted ${lineCount} lines. Quiz yourself?`,
+				'Vibe Check Me',
+				'Later'
+			);
+			if (choice !== 'Vibe Check Me') {
+				return;
+			}
+		} else {
+			vscode.window.setStatusBarMessage(
+				`$(mortar-board) Vibe Check: quizzing ${lineCount} lines…`,
+				6000
+			);
+		}
+
 		const codeSnippet = sliceSnippet(ev.document, ev.lineRange.start, ev.lineRange.end);
 		await generateModule('code', {
 			explicitCode: codeSnippet,
@@ -239,14 +266,7 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 		}),
 		vscode.commands.registerCommand('vibeCheck.newModule', async () => {
-			const choice = await vscode.window.showQuickPick(
-				TOPICS.map((t) => ({ label: t, description: topicDescription(t) })),
-				{ placeHolder: 'Pick a module topic' }
-			);
-			if (!choice) {
-				return;
-			}
-			await generateModule(choice.label as Topic);
+			sidebar.openPicker();
 		}),
 		vscode.commands.registerCommand('vibeCheck.quizSelection', async () => {
 			const editor = vscode.window.activeTextEditor;
@@ -302,59 +322,9 @@ function sliceSnippet(doc: vscode.TextDocument, start: number, end: number): str
 	return doc.getText(range);
 }
 
-function isAnswerCorrect(q: Question, answer: AnswerPayload): boolean {
-	if (q.type === 'multiple-choice' && answer.kind === 'multiple-choice') {
-		return answer.choiceIndex === q.correctIndex;
-	}
-	if (q.type === 'code-order' && answer.kind === 'code-order') {
-		if (answer.sequence.length !== q.correctSequence.length) {
-			return false;
-		}
-		return answer.sequence.every((line, i) => line === q.correctSequence[i]);
-	}
-	return false;
-}
-
 function describeCorrectAnswer(q: Question): string {
 	if (q.type === 'multiple-choice') {
 		return q.options[q.correctIndex];
 	}
 	return q.correctSequence.map((l, i) => `${i + 1}. ${l}`).join('\n');
-}
-
-function describeUserAnswer(q: Question, answer: AnswerPayload): string {
-	if (q.type === 'multiple-choice' && answer.kind === 'multiple-choice') {
-		const opt = q.options[answer.choiceIndex];
-		return opt !== undefined ? opt : '(no selection)';
-	}
-	if (q.type === 'code-order' && answer.kind === 'code-order') {
-		return answer.sequence.map((l, i) => `${i + 1}. ${l}`).join('\n');
-	}
-	return '(invalid)';
-}
-
-function trackXp(track: Question['track']): number {
-	switch (track) {
-		case 'beginner':
-			return 5;
-		case 'intermediate':
-			return 10;
-		case 'expert':
-			return 20;
-	}
-}
-
-function topicDescription(t: Topic): string {
-	switch (t) {
-		case 'code':
-			return 'Selection or current file';
-		case 'infrastructure':
-			return 'Build & config files';
-		case 'tools':
-			return 'Dependencies and scripts';
-		case 'architecture':
-			return 'Project structure';
-		case 'security':
-			return 'Security review of current file';
-	}
 }

@@ -2,8 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { Capabilities, Topic } from './types';
 
-const MAX_FILE_BYTES = 8000;
-const MAX_TOTAL_BYTES = 24000;
+const MAX_FILE_BYTES = 5000;
+const MAX_TOTAL_BYTES = 16000;
 
 export interface GatheredContext {
 	label: string;

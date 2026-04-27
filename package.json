@@ -1,13 +1,37 @@
 {
   "name": "vibe-check",
-  "displayName": "vibe-check",
-  "description": "Combat \"vibe coding\" with AI-driven spaced repetition (SRS) quizes that ensure you understand every line your agent writes.",
+  "displayName": "Vibe Check",
+  "description": "Anti-vibe-coding mentor. When AI writes code for you, Vibe Check turns it into a Duolingo-style quiz so you actually understand it.",
   "version": "0.0.1",
+  "publisher": "TODO-set-your-marketplace-publisher-id",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "homepage": "https://github.com/TODO-your-org/vibe-check#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TODO-your-org/vibe-check.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TODO-your-org/vibe-check/issues"
+  },
   "engines": {
-    "vscode": "^1.116.0"
+    "vscode": "^1.95.0"
   },
   "categories": [
+    "Education",
+    "AI",
     "Other"
+  ],
+  "keywords": [
+    "ai",
+    "copilot",
+    "learning",
+    "spaced repetition",
+    "srs",
+    "duolingo",
+    "education",
+    "antigravity",
+    "quiz"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -54,6 +78,22 @@
       {
         "command": "vibeCheck.resetProgress",
         "title": "Vibe Check: Reset Progress"
+      },
+      {
+        "command": "vibeCheck.switchProvider",
+        "title": "Vibe Check: Switch Provider..."
+      },
+      {
+        "command": "vibeCheck.selectModel",
+        "title": "Vibe Check: Select Model..."
+      },
+      {
+        "command": "vibeCheck.setApiKey",
+        "title": "Vibe Check: Set API Key..."
+      },
+      {
+        "command": "vibeCheck.clearApiKey",
+        "title": "Vibe Check: Clear API Key..."
       }
     ],
     "menus": {
@@ -64,7 +104,87 @@
           "group": "vibeCheck"
         }
       ]
-    }
+    },
+    "configuration": [
+      {
+        "title": "Vibe Check",
+        "order": 1,
+        "properties": {
+          "vibeCheck.autoQuiz": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "description": "Automatically generate a quiz when the Pulse Observer detects a large AI insertion. Turn off to be prompted before each quiz."
+          },
+          "vibeCheck.modelProvider": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "copilot",
+              "antigravity",
+              "anthropic",
+              "gemini",
+              "openai",
+              "openrouter"
+            ],
+            "enumDescriptions": [
+              "Auto: prefer Antigravity if hosted there, else Copilot, else any direct provider with a saved key.",
+              "VS Code language model API (requires GitHub Copilot subscription).",
+              "Antigravity built-in AI (only inside the Antigravity host).",
+              "Anthropic Claude direct (set key via 'Vibe Check: Set API Key...').",
+              "Google Gemini direct (set key via 'Vibe Check: Set API Key...').",
+              "OpenAI direct (set key via 'Vibe Check: Set API Key...').",
+              "OpenRouter aggregator, ~100+ models behind one key (set key via 'Vibe Check: Set API Key...')."
+            ],
+            "default": "auto",
+            "order": 2,
+            "markdownDescription": "Which LLM backend Vibe Check uses. API keys for direct providers live in encrypted SecretStorage — set them with **`Vibe Check: Set API Key...`**. Pick a model with **`Vibe Check: Select Model...`**."
+          }
+        }
+      },
+      {
+        "title": "Vibe Check: Models",
+        "order": 2,
+        "properties": {
+          "vibeCheck.copilotModel": {
+            "type": "string",
+            "default": "",
+            "order": 1,
+            "markdownDescription": "**Copilot** family override (e.g. `gpt-4o`, `claude-3.5-sonnet`). Leave empty to use the default. Pick interactively with **`Vibe Check: Select Model...`**."
+          },
+          "vibeCheck.antigravityModel": {
+            "type": "string",
+            "default": "",
+            "order": 2,
+            "markdownDescription": "**Antigravity** model override (e.g. `gemini-3-flash`). Leave empty to use the default."
+          },
+          "vibeCheck.anthropicModel": {
+            "type": "string",
+            "default": "",
+            "order": 3,
+            "markdownDescription": "**Anthropic** model id (e.g. `claude-sonnet-4-6`, `claude-opus-4-7`). Leave empty for default. Get a key at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys), then run **`Vibe Check: Set API Key...`**."
+          },
+          "vibeCheck.geminiModel": {
+            "type": "string",
+            "default": "",
+            "order": 4,
+            "markdownDescription": "**Gemini** model id (e.g. `gemini-3-flash-preview`, `gemini-3.1-pro-preview`, `gemini-2.5-flash`). Leave empty for default. Get a key at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey), then run **`Vibe Check: Set API Key...`**."
+          },
+          "vibeCheck.openaiModel": {
+            "type": "string",
+            "default": "",
+            "order": 5,
+            "markdownDescription": "**OpenAI** model id (e.g. `gpt-5.5`, `gpt-5.4-mini`, `gpt-4o`). Leave empty for default. Get a key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys), then run **`Vibe Check: Set API Key...`**."
+          },
+          "vibeCheck.openrouterModel": {
+            "type": "string",
+            "default": "",
+            "order": 6,
+            "markdownDescription": "**OpenRouter** model id (e.g. `anthropic/claude-sonnet-4-6`, browse the [model catalog](https://openrouter.ai/models)). Leave empty for default. Get a key at [openrouter.ai/keys](https://openrouter.ai/keys), then run **`Vibe Check: Set API Key...`**."
+          }
+        }
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

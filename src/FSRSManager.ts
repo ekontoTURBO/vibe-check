@@ -24,7 +24,11 @@ const EMPTY_TRACK: TrackProgress = {
 	lastReviewDate: null,
 	totalAnswered: 0,
 	totalCorrect: 0,
+	dailyXp: 0,
+	dailyXpDate: null,
 };
+
+const DAILY_GOAL = 50;
 
 const DEFAULT_PROGRESS: ProgressState = {
 	tracks: {
@@ -170,9 +174,18 @@ export class FSRSManager {
 		if (!stored) {
 			return cloneProgress(DEFAULT_PROGRESS);
 		}
-		const tracks = { ...DEFAULT_PROGRESS.tracks, ...stored.tracks };
+		const today = dateKey(new Date());
+		const tracks: ProgressState['tracks'] = {
+			beginner: normalizeTrack(stored.tracks?.beginner, today),
+			intermediate: normalizeTrack(stored.tracks?.intermediate, today),
+			expert: normalizeTrack(stored.tracks?.expert, today),
+		};
 		const activeTrack = TRACKS.includes(stored.activeTrack) ? stored.activeTrack : 'beginner';
 		return { tracks, activeTrack };
+	}
+
+	getDailyGoal(): number {
+		return DAILY_GOAL;
 	}
 
 	async setActiveTrack(track: Track): Promise<ProgressState> {
@@ -235,12 +248,15 @@ export class FSRSManager {
 			}
 		}
 
+		const dailyReset = trackPrev.dailyXpDate !== today;
 		const updatedTrack: TrackProgress = {
 			xp: trackPrev.xp + xpDelta,
 			streak,
 			lastReviewDate: today,
 			totalAnswered: trackPrev.totalAnswered + 1,
 			totalCorrect: trackPrev.totalCorrect + (correct ? 1 : 0),
+			dailyXp: (dailyReset ? 0 : trackPrev.dailyXp) + xpDelta,
+			dailyXpDate: today,
 		};
 
 		const next: ProgressState = {
@@ -296,6 +312,14 @@ function cloneProgress(p: ProgressState): ProgressState {
 			expert: { ...p.tracks.expert },
 		},
 	};
+}
+
+function normalizeTrack(raw: Partial<TrackProgress> | undefined, today: string): TrackProgress {
+	const base: TrackProgress = { ...EMPTY_TRACK, ...(raw ?? {}) };
+	if (base.dailyXpDate !== today) {
+		base.dailyXp = 0;
+	}
+	return base;
 }
 
 function dateKey(d: Date): string {

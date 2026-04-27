@@ -3,6 +3,7 @@
 out/**
 node_modules/**
 src/**
+handoff/**
 .gitignore
 .yarnrc
 esbuild.js

@@ -122,7 +122,7 @@ Now write the personalized explanation of WHY their answer is wrong.`;
 	async generateLessonQuestions(module: Module, lesson: ModuleLesson): Promise<Question[]> {
 		const system = this.buildLessonSystemPrompt(module, lesson);
 		const user = this.buildContextPrompt(module.contextLabel, module.context);
-		const raw = await this.llm.complete({ system, user, maxTokens: 2000 });
+		const raw = await this.llm.complete({ system, user, maxTokens: 1500 });
 		const parsed = this.parseQuestions(raw);
 
 		return parsed.map((p, i) =>

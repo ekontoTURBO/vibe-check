@@ -1,4 +1,4 @@
-import { Card } from 'ts-fsrs';
+import type { Card } from 'ts-fsrs';
 
 export type Track = 'beginner' | 'intermediate' | 'expert';
 export const TRACKS: Track[] = ['beginner', 'intermediate', 'expert'];
@@ -91,6 +91,8 @@ export interface TrackProgress {
 	lastReviewDate: string | null;
 	totalAnswered: number;
 	totalCorrect: number;
+	dailyXp: number;
+	dailyXpDate: string | null;
 }
 
 export interface ProgressState {
