@@ -1,0 +1,98 @@
+{
+  "name": "vibe-check",
+  "displayName": "vibe-check",
+  "description": "Combat \"vibe coding\" with AI-driven spaced repetition (SRS) quizes that ensure you understand every line your agent writes.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.116.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vibeCheck",
+          "title": "Vibe Check",
+          "icon": "$(mortar-board)"
+        }
+      ]
+    },
+    "views": {
+      "vibeCheck": [
+        {
+          "type": "webview",
+          "id": "vibeCheck.sidebar",
+          "name": "Mentor",
+          "icon": "$(mortar-board)",
+          "contextualTitle": "Vibe Check"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "vibeCheck.startReview",
+        "title": "Vibe Check: Start Due Review"
+      },
+      {
+        "command": "vibeCheck.newModule",
+        "title": "Vibe Check: New Module..."
+      },
+      {
+        "command": "vibeCheck.quizSelection",
+        "title": "Vibe Check: Quiz Me On Selection"
+      },
+      {
+        "command": "vibeCheck.setTrack",
+        "title": "Vibe Check: Switch Track"
+      },
+      {
+        "command": "vibeCheck.resetProgress",
+        "title": "Vibe Check: Reset Progress"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "vibeCheck.quizSelection",
+          "when": "editorHasSelection",
+          "group": "vibeCheck"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.116.0",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.27.3",
+    "eslint": "^9.39.3",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  },
+  "dependencies": {
+    "ts-fsrs": "^5.3.2"
+  }
+}
