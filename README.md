@@ -104,12 +104,13 @@ Got a question wrong? The default explanation is canonical and free. Click **? W
 
 | Provider | Set up | Best for |
 |---|---|---|
-| **GitHub Copilot** (`vscode.lm`) | Just sign into Copilot in VS Code | Free if you have Copilot |
-| **Antigravity AI** | Auto-detected when running in Antigravity | Free in-host |
+| **GitHub Copilot** (`vscode.lm`) | Just sign into Copilot in VS Code — no key needed | Free if you have Copilot |
 | **Anthropic Claude** | Get a key at [console.anthropic.com](https://console.anthropic.com/settings/keys) | Best educational explanations |
 | **Google Gemini** | Get a key at [aistudio.google.com](https://aistudio.google.com/app/apikey) | Cheapest at scale |
 | **OpenAI** | Get a key at [platform.openai.com](https://platform.openai.com/api-keys) | Most familiar |
 | **OpenRouter** | Get a key at [openrouter.ai](https://openrouter.ai/keys) | One key, 100+ models |
+
+> ⚠️ **Antigravity / Cursor / Windsurf users:** these editors **don't currently expose their built-in AI to extensions** (Antigravity SDK is for "agents using your tools", not "your tools using the agent"; Cursor explicitly doesn't support `vscode.lm`). You'll need to set up a direct provider (Anthropic, Gemini, OpenAI, or OpenRouter) — Vibe Check uses it via API key. Run **`Vibe Check: Configure Provider`** from the command palette to set up in one guided flow.
 
 API keys are stored encrypted in VS Code SecretStorage — they never sync to Settings Sync, never end up in `settings.json`. Set, clear, and rotate them via the command palette.
 

@@ -47,8 +47,8 @@ export interface LLMProvider extends ProviderInfo {
 }
 
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
-	copilot: 'GitHub Copilot (VS Code LM)',
-	antigravity: 'Antigravity AI',
+	copilot: 'VS Code LM (Copilot / Antigravity / Cursor built-in AI)',
+	antigravity: 'Antigravity AI (legacy globalThis hook)',
 	anthropic: 'Anthropic (Claude direct)',
 	gemini: 'Google Gemini direct',
 	openai: 'OpenAI direct',

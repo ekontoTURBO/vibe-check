@@ -1,9 +1,14 @@
 import * as vscode from 'vscode';
 import { CompleteOptions, LLMProvider, LLMRequest } from './types';
 
+/**
+ * Provider for VS Code's built-in language model API (`vscode.lm`).
+ * Used by Copilot in VS Code, and by Antigravity / Cursor / Windsurf for their built-in AI
+ * (each registers under its own vendor name). Tries `copilot` first, then any vendor.
+ */
 export class CopilotProvider implements LLMProvider {
 	readonly id = 'copilot' as const;
-	readonly label = 'GitHub Copilot (VS Code LM)';
+	readonly label = 'VS Code LM (Copilot / built-in AI)';
 	readonly requiresApiKey = false;
 	readonly defaultModel = 'gpt-4o';
 
@@ -15,7 +20,12 @@ export class CopilotProvider implements LLMProvider {
 			return false;
 		}
 		try {
-			const models = await lm.selectChatModels({ vendor: 'copilot' });
+			let models = await lm.selectChatModels({ vendor: 'copilot' });
+			if (models.length === 0) {
+				// In Antigravity / Cursor / Windsurf etc., the built-in AI registers
+				// under a different vendor — try any vendor as fallback.
+				models = await lm.selectChatModels();
+			}
 			return models.length > 0;
 		} catch {
 			return false;
@@ -25,15 +35,25 @@ export class CopilotProvider implements LLMProvider {
 	async complete(req: LLMRequest, opts?: CompleteOptions): Promise<string> {
 		const lm = (vscode as unknown as { lm?: typeof vscode.lm }).lm;
 		if (!lm || typeof lm.selectChatModels !== 'function') {
-			throw new Error('Copilot LM API unavailable. Install GitHub Copilot.');
+			throw new Error('VS Code LM API unavailable. No built-in AI in this host.');
 		}
 		const family = (opts?.model && opts.model.trim()) || this.defaultModel;
-		const models =
-			(await lm.selectChatModels({ vendor: 'copilot', family })) ??
-			(await lm.selectChatModels({ vendor: 'copilot' }));
+		// Selection order: copilot+family → copilot any → any vendor any family
+		let models = await lm.selectChatModels({ vendor: 'copilot', family });
+		if (models.length === 0) {
+			models = await lm.selectChatModels({ vendor: 'copilot' });
+		}
+		if (models.length === 0) {
+			models = await lm.selectChatModels({ family });
+		}
+		if (models.length === 0) {
+			models = await lm.selectChatModels();
+		}
 		const model = models[0];
 		if (!model) {
-			throw new Error('No Copilot chat model available. Sign into Copilot.');
+			throw new Error(
+				'No VS Code language model available. Install GitHub Copilot, or run inside an editor that ships a built-in AI.'
+			);
 		}
 
 		const messages = [vscode.LanguageModelChatMessage.User(`${req.system}\n\n${req.user}`)];
@@ -64,7 +84,8 @@ export class CopilotProvider implements LLMProvider {
 		if (!lm) {
 			return this.curatedModels();
 		}
-		const models = await lm.selectChatModels({ vendor: 'copilot' });
+		// List ALL available vendors and their families
+		const models = await lm.selectChatModels();
 		const families = new Set<string>();
 		for (const m of models) {
 			if (m.family) {

@@ -22,12 +22,11 @@ const TOPICS: TopicEntry[] = [
 function isAvailable(t: Topic, caps: Capabilities): boolean {
 	switch (t) {
 		case 'code':
-			return caps.hasActiveEditor;
+			return caps.hasActiveEditor || caps.hasWorkspaceFolder;
 		case 'infrastructure':
 		case 'architecture':
-			return caps.hasWorkspaceFolder;
 		case 'tools':
-			return caps.hasPackageJson;
+			return caps.hasWorkspaceFolder;
 		case 'security':
 			return caps.hasActiveEditor || caps.hasWorkspaceFolder;
 	}

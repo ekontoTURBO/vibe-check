@@ -7,7 +7,7 @@ export class GeminiProvider implements LLMProvider {
 	readonly id = 'gemini' as const;
 	readonly label = 'Google Gemini direct';
 	readonly requiresApiKey = true;
-	readonly defaultModel = 'gemini-3-flash-preview';
+	readonly defaultModel = 'gemini-2.5-flash';
 	readonly getKeyUrl = PROVIDER_KEY_URLS.gemini;
 
 	constructor(private secrets: ProviderSecrets) {}

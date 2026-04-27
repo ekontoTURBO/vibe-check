@@ -15,10 +15,121 @@ export function registerProviderCommands(
 	registry: ProviderRegistry
 ): void {
 	context.subscriptions.push(
+		vscode.commands.registerCommand('vibeCheck.configureProvider', () =>
+			configureProvider(registry)
+		),
 		vscode.commands.registerCommand('vibeCheck.setApiKey', () => setApiKey(registry)),
 		vscode.commands.registerCommand('vibeCheck.clearApiKey', () => clearApiKey(registry)),
 		vscode.commands.registerCommand('vibeCheck.selectModel', () => selectModel(registry)),
 		vscode.commands.registerCommand('vibeCheck.switchProvider', () => switchProvider(registry))
+	);
+}
+
+/**
+ * Single guided flow: pick provider → paste API key (if needed) → pick model.
+ * Replaces the old three-step "discover Set API Key, then Switch Provider, then Select Model" dance.
+ */
+async function configureProvider(registry: ProviderRegistry): Promise<void> {
+	// Step 1: pick provider
+	const providerItems: vscode.QuickPickItem[] = [
+		{
+			label: 'auto',
+			description: 'Use built-in AI if available (Copilot in VS Code), else any direct provider with a key',
+		},
+		...ALL_PROVIDERS.map((id) => ({
+			label: id,
+			description: PROVIDER_LABELS[id],
+		})),
+	];
+	const providerPick = await vscode.window.showQuickPick(providerItems, {
+		title: 'Vibe Check Setup — Step 1 of 3: Pick a provider',
+		placeHolder: 'Which AI backend should generate your quizzes?',
+		ignoreFocusOut: true,
+	});
+	if (!providerPick) {
+		return;
+	}
+	await vscode.workspace
+		.getConfiguration('vibeCheck')
+		.update('modelProvider', providerPick.label, vscode.ConfigurationTarget.Global);
+
+	if (providerPick.label === 'auto') {
+		vscode.window.showInformationMessage(
+			'Vibe Check: provider set to auto. Configure individual providers separately as needed.'
+		);
+		return;
+	}
+
+	const id = providerPick.label as ProviderId;
+	const provider = registry.get(id);
+
+	// Step 2: API key (only for direct providers that need one)
+	if (provider.requiresApiKey) {
+		const existing = await registry.secrets.get(id);
+		const action = existing
+			? await vscode.window.showQuickPick(
+					[
+						{ label: 'Keep existing key', value: 'keep' as const },
+						{ label: 'Replace with new key', value: 'replace' as const },
+					],
+					{
+						title: `Vibe Check Setup — Step 2 of 3: ${PROVIDER_LABELS[id]} API key`,
+						placeHolder: 'A key is already saved for this provider. Replace it?',
+					}
+			  )
+			: { value: 'replace' as const };
+		if (!action) {
+			return;
+		}
+		if (action.value === 'replace') {
+			const url = PROVIDER_KEY_URLS[id];
+			const key = await vscode.window.showInputBox({
+				title: `Vibe Check Setup — Step 2 of 3: ${PROVIDER_LABELS[id]} API key`,
+				prompt: url ? `Get a key at ${url}` : 'Paste your API key',
+				password: true,
+				ignoreFocusOut: true,
+				placeHolder: 'sk-... / AIzaSy... / sk-or-... etc',
+				validateInput: (v) => (v.trim().length < 8 ? 'That looks too short.' : undefined),
+			});
+			if (!key) {
+				return;
+			}
+			await registry.secrets.set(id, key.trim());
+		}
+	}
+
+	// Step 3: model
+	const currentModel = registry.getModelFor(id);
+	const modelItems = await loadModelItems(provider, currentModel);
+	const modelPick = await vscode.window.showQuickPick(modelItems, {
+		title: `Vibe Check Setup — Step 3 of 3: ${PROVIDER_LABELS[id]} model`,
+		placeHolder: `Currently: ${currentModel}`,
+		matchOnDescription: true,
+		ignoreFocusOut: true,
+	});
+	if (!modelPick) {
+		return;
+	}
+
+	let chosen: string;
+	if (modelPick.label === CUSTOM_MODEL_PICK) {
+		const custom = await vscode.window.showInputBox({
+			title: `${PROVIDER_LABELS[id]} — custom model id`,
+			prompt: 'Enter the model id exactly as the provider expects it',
+			value: currentModel,
+			ignoreFocusOut: true,
+		});
+		if (!custom) {
+			return;
+		}
+		chosen = custom.trim();
+	} else {
+		chosen = modelPick.label;
+	}
+	await registry.setModelFor(id, chosen);
+
+	vscode.window.showInformationMessage(
+		`Vibe Check: configured ${PROVIDER_LABELS[id]} with model ${chosen}. You're ready to go.`
 	);
 }
 

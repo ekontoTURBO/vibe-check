@@ -102,6 +102,10 @@ const INFRASTRUCTURE_CANDIDATES: string[] = [
 const CONFIG_FILE_PATTERN =
 	/^(\.[^/]+|.+\.(json|jsonc|yaml|yml|toml|ini|conf))$|^Makefile$|^Dockerfile.*|^[A-Z][a-zA-Z]+file$|.+\.(gradle|gradle\.kts|gemspec|cabal)$/;
 
+/** Source-code file extensions the Security topic scans for when no editor is active. */
+const SOURCE_FILE_PATTERN =
+	/\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|rb|php|swift|dart|ex|exs|hs|scala|clj|lua|sh|bash|zsh)$/i;
+
 export interface GatheredContext {
 	label: string;
 	content: string;
@@ -131,12 +135,11 @@ export async function detectCapabilities(): Promise<Capabilities> {
 export function isTopicAvailable(topic: Topic, caps: Capabilities): boolean {
 	switch (topic) {
 		case 'code':
-			return caps.hasActiveEditor;
+			return caps.hasActiveEditor || caps.hasWorkspaceFolder;
 		case 'infrastructure':
 		case 'architecture':
-			return caps.hasWorkspaceFolder;
 		case 'tools':
-			return caps.hasPackageJson;
+			return caps.hasWorkspaceFolder;
 		case 'security':
 			return caps.hasActiveEditor || caps.hasWorkspaceFolder;
 	}
@@ -169,24 +172,40 @@ export class ContextGatherer {
 
 	private async gatherActiveFile(): Promise<GatheredContext> {
 		const editor = vscode.window.activeTextEditor;
-		if (!editor) {
-			throw new Error('Open a file or select code first to generate a code lesson.');
+		if (editor && editor.document.uri.scheme === 'file') {
+			const text = editor.selection.isEmpty
+				? editor.document.getText()
+				: editor.document.getText(editor.selection);
+			if (text.trim().length >= 40) {
+				const truncated = this.truncate(text, MAX_FILE_BYTES);
+				const range = editor.selection.isEmpty
+					? { start: 0, end: editor.document.lineCount - 1 }
+					: { start: editor.selection.start.line, end: editor.selection.end.line };
+				return {
+					label: path.basename(editor.document.fileName),
+					content: truncated,
+					sourceFile: editor.document.fileName,
+					lineRange: range,
+				};
+			}
 		}
-		const text = editor.selection.isEmpty
-			? editor.document.getText()
-			: editor.document.getText(editor.selection);
-		if (text.trim().length < 40) {
-			throw new Error('Selected code is too short — pick at least a few lines.');
+
+		// No useful editor — scan the workspace for a source file.
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			throw new Error('Open a source file or workspace folder to generate a code lesson.');
 		}
-		const truncated = this.truncate(text, MAX_FILE_BYTES);
-		const range = editor.selection.isEmpty
-			? { start: 0, end: editor.document.lineCount - 1 }
-			: { start: editor.selection.start.line, end: editor.selection.end.line };
+		const sourceFile = await this.findRepresentativeSourceFile(folders[0].uri);
+		if (!sourceFile) {
+			throw new Error(
+				'No source files found in this workspace. Open any code file in the editor first.'
+			);
+		}
 		return {
-			label: path.basename(editor.document.fileName),
-			content: truncated,
-			sourceFile: editor.document.fileName,
-			lineRange: range,
+			label: path.basename(sourceFile.path),
+			content: this.truncate(sourceFile.content, MAX_FILE_BYTES),
+			sourceFile: sourceFile.path,
+			lineRange: { start: 0, end: sourceFile.content.split('\n').length - 1 },
 		};
 	}
 
@@ -195,28 +214,64 @@ export class ContextGatherer {
 	}
 
 	private async gatherTools(): Promise<GatheredContext> {
-		const pkg = await this.readWorkspaceFile('package.json');
-		if (!pkg) {
-			throw new Error('No package.json found — cannot generate a tools lesson.');
+		// Try language-specific deps files in priority order.
+		const candidates: Array<{ name: string; label: string }> = [
+			{ name: 'package.json', label: 'package.json (deps + scripts)' },
+			{ name: 'Cargo.toml', label: 'Cargo.toml (Rust deps)' },
+			{ name: 'pyproject.toml', label: 'pyproject.toml (Python deps)' },
+			{ name: 'requirements.txt', label: 'requirements.txt (Python deps)' },
+			{ name: 'Pipfile', label: 'Pipfile (Python deps)' },
+			{ name: 'go.mod', label: 'go.mod (Go deps)' },
+			{ name: 'Gemfile', label: 'Gemfile (Ruby deps)' },
+			{ name: 'composer.json', label: 'composer.json (PHP deps)' },
+			{ name: 'pom.xml', label: 'pom.xml (Maven deps)' },
+			{ name: 'build.gradle', label: 'build.gradle (Gradle deps)' },
+			{ name: 'build.gradle.kts', label: 'build.gradle.kts (Gradle deps)' },
+			{ name: 'pubspec.yaml', label: 'pubspec.yaml (Dart/Flutter deps)' },
+			{ name: 'Package.swift', label: 'Package.swift (Swift deps)' },
+			{ name: 'mix.exs', label: 'mix.exs (Elixir deps)' },
+			{ name: 'deno.json', label: 'deno.json (Deno deps)' },
+			{ name: 'bunfig.toml', label: 'bunfig.toml (Bun deps)' },
+		];
+
+		for (const { name, label } of candidates) {
+			const found = await this.readWorkspaceFile(name);
+			if (!found) {
+				continue;
+			}
+
+			// Special-case package.json: trim to the relevant fields only.
+			if (name === 'package.json') {
+				let parsed: Record<string, unknown> = {};
+				try {
+					parsed = JSON.parse(found.content);
+				} catch {
+					parsed = {};
+				}
+				const trimmed = {
+					name: parsed.name,
+					scripts: parsed.scripts,
+					dependencies: parsed.dependencies,
+					devDependencies: parsed.devDependencies,
+					engines: parsed.engines,
+				};
+				return {
+					label,
+					content: JSON.stringify(trimmed, null, 2),
+					sourceFile: found.path,
+				};
+			}
+
+			return {
+				label,
+				content: this.truncate(found.content, MAX_FILE_BYTES),
+				sourceFile: found.path,
+			};
 		}
-		let parsed: Record<string, unknown> = {};
-		try {
-			parsed = JSON.parse(pkg.content);
-		} catch {
-			parsed = {};
-		}
-		const trimmed = {
-			name: parsed.name,
-			scripts: parsed.scripts,
-			dependencies: parsed.dependencies,
-			devDependencies: parsed.devDependencies,
-			engines: parsed.engines,
-		};
-		return {
-			label: 'package.json (deps + scripts)',
-			content: JSON.stringify(trimmed, null, 2),
-			sourceFile: pkg.path,
-		};
+
+		throw new Error(
+			'No dependency manifest found at workspace root. Looked for: package.json, Cargo.toml, pyproject.toml, requirements.txt, go.mod, Gemfile, composer.json, pom.xml, build.gradle, pubspec.yaml, Package.swift, mix.exs, deno.json. Open a project that has one.'
+		);
 	}
 
 	private async gatherArchitecture(): Promise<GatheredContext> {
@@ -234,16 +289,68 @@ export class ContextGatherer {
 
 	private async gatherSecurity(): Promise<GatheredContext> {
 		const editor = vscode.window.activeTextEditor;
-		if (editor) {
+		if (editor && editor.document.uri.scheme === 'file') {
 			const text = editor.document.getText();
+			if (text.trim().length > 40) {
+				return {
+					label: `Security review of ${path.basename(editor.document.fileName)}`,
+					content: this.truncate(text, MAX_FILE_BYTES),
+					sourceFile: editor.document.fileName,
+					lineRange: { start: 0, end: editor.document.lineCount - 1 },
+				};
+			}
+		}
+
+		// No useful editor content — find a representative source file from the workspace.
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			throw new Error('Open a file or workspace folder to generate a security review.');
+		}
+		const sourceFile = await this.findRepresentativeSourceFile(folders[0].uri);
+		if (sourceFile) {
 			return {
-				label: `Security review of ${path.basename(editor.document.fileName)}`,
-				content: this.truncate(text, MAX_FILE_BYTES),
-				sourceFile: editor.document.fileName,
-				lineRange: { start: 0, end: editor.document.lineCount - 1 },
+				label: `Security review of ${path.basename(sourceFile.path)}`,
+				content: this.truncate(sourceFile.content, MAX_FILE_BYTES),
+				sourceFile: sourceFile.path,
+				lineRange: { start: 0, end: sourceFile.content.split('\n').length - 1 },
 			};
 		}
+
+		// Last resort — review whatever config files we can find.
 		return this.collectFiles(INFRASTRUCTURE_CANDIDATES, 'Security review of project config');
+	}
+
+	private async findRepresentativeSourceFile(
+		root: vscode.Uri
+	): Promise<{ path: string; content: string } | null> {
+		const candidatesByDir = [
+			vscode.Uri.joinPath(root, 'src'),
+			vscode.Uri.joinPath(root, 'lib'),
+			vscode.Uri.joinPath(root, 'app'),
+			vscode.Uri.joinPath(root, 'source'),
+			root,
+		];
+		for (const dir of candidatesByDir) {
+			try {
+				const entries = await vscode.workspace.fs.readDirectory(dir);
+				const files = entries
+					.filter(
+						([name, type]) =>
+							type === vscode.FileType.File && SOURCE_FILE_PATTERN.test(name)
+					)
+					.map(([name]) => name);
+				for (const name of files) {
+					const fileUri = vscode.Uri.joinPath(dir, name);
+					const content = await this.readFile(fileUri);
+					if (content && content.trim().length >= 100) {
+						return { path: fileUri.fsPath, content };
+					}
+				}
+			} catch {
+				// directory doesn't exist or unreadable, try next
+			}
+		}
+		return null;
 	}
 
 	private async collectFiles(paths: string[], label: string): Promise<GatheredContext> {

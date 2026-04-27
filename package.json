@@ -2,7 +2,7 @@
   "name": "vibe-check",
   "displayName": "Vibe Check",
   "description": "Anti-vibe-coding mentor. When AI writes code for you, Vibe Check turns it into a Duolingo-style quiz so you actually understand it.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "cognitra",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -80,6 +80,10 @@
         "title": "Vibe Check: Reset Progress"
       },
       {
+        "command": "vibeCheck.configureProvider",
+        "title": "Vibe Check: Configure Provider (Setup Wizard)..."
+      },
+      {
         "command": "vibeCheck.switchProvider",
         "title": "Vibe Check: Switch Provider..."
       },
@@ -94,6 +98,10 @@
       {
         "command": "vibeCheck.clearApiKey",
         "title": "Vibe Check: Clear API Key..."
+      },
+      {
+        "command": "vibeCheck.openWalkthrough",
+        "title": "Vibe Check: Open Get Started Walkthrough"
       }
     ],
     "menus": {
@@ -105,6 +113,69 @@
         }
       ]
     },
+    "walkthroughs": [
+      {
+        "id": "vibeCheck.gettingStarted",
+        "title": "Get Started with Vibe Check",
+        "description": "Anti-vibe-coding mentor — set up in 60 seconds.",
+        "steps": [
+          {
+            "id": "setup-provider",
+            "title": "1 · Pick your AI provider",
+            "description": "Vibe Check needs an LLM to turn AI-generated code into quizzes.\n\n**In VS Code with Copilot?** Pick `copilot` — no API key needed.\n\n**In Antigravity, Cursor, Windsurf, or VSCodium?** Pick a direct provider (Anthropic / Gemini / OpenAI / OpenRouter). These editors don't expose their built-in AI to extensions, so you'll need your own API key. The wizard walks you through getting one.\n\n[Open Setup Wizard](command:vibeCheck.configureProvider)",
+            "media": {
+              "markdown": "media/walkthrough/providers.md"
+            },
+            "completionEvents": [
+              "onCommand:vibeCheck.configureProvider"
+            ]
+          },
+          {
+            "id": "pick-track",
+            "title": "2 · Pick your difficulty track",
+            "description": "Three difficulty tracks, each with its own progress and streak:\n\n- **Beginner** · 5 XP per correct — recognition and recall\n- **Intermediate** · 10 XP per correct — applied logic, predict outputs\n- **Expert** · 20 XP per correct — architecture, edge cases, trade-offs\n\nSwitch freely whenever you want a different challenge level.\n\n[Pick a Track](command:vibeCheck.setTrack)",
+            "media": {
+              "markdown": "media/walkthrough/tracks.md"
+            },
+            "completionEvents": [
+              "onCommand:vibeCheck.setTrack"
+            ]
+          },
+          {
+            "id": "first-module",
+            "title": "3 · Generate your first module",
+            "description": "Three ways to create a module:\n\n1. **Let it auto-fire.** When an AI agent inserts >5 lines into your editor, Vibe Check spawns a 5-lesson module automatically.\n2. **Right-click selected code** in the editor → `Vibe Check: Quiz Me On Selection`.\n3. **Open the sidebar** (🎓 mortarboard icon in the activity bar) and click **+ NEW**.\n\n[Open Sidebar](command:workbench.view.extension.vibeCheck)",
+            "media": {
+              "markdown": "media/walkthrough/firstModule.md"
+            },
+            "completionEvents": [
+              "onCommand:vibeCheck.newModule",
+              "onCommand:vibeCheck.quizSelection"
+            ]
+          },
+          {
+            "id": "spaced-repetition",
+            "title": "4 · Daily review — the secret sauce",
+            "description": "Every question you answer enters a spaced-repetition queue (FSRS algorithm). Tomorrow Vibe Check asks you the trickiest ones again, the day after that the next-trickiest, and so on. This is what makes the knowledge actually stick.\n\nClick **↻ START DUE REVIEW** in the sidebar when cards are due. Aim for 50 XP a day to keep your streak alive.\n\n[Start a Review](command:vibeCheck.startReview)",
+            "media": {
+              "markdown": "media/walkthrough/srs.md"
+            },
+            "completionEvents": [
+              "onCommand:vibeCheck.startReview"
+            ]
+          },
+          {
+            "id": "done",
+            "title": "5 · You're all set",
+            "description": "That's it — close this walkthrough and let an AI agent write some code.\n\n**Tips:**\n- Click backtick code references in question prompts to jump to the source\n- Wrong answer? Click **? WHY** for a personalized LLM explanation\n- Customize via **Settings → search 'vibe check'**\n\nFeedback / bugs: [GitHub issues](https://github.com/ekontoTURBO/vibe-check/issues)",
+            "media": {
+              "markdown": "media/walkthrough/done.md"
+            },
+            "completionEvents": []
+          }
+        ]
+      }
+    ],
     "configuration": [
       {
         "title": "Vibe Check",
@@ -131,14 +202,14 @@
               "Auto: prefer Antigravity if hosted there, else Copilot, else any direct provider with a saved key.",
               "VS Code language model API (requires GitHub Copilot subscription).",
               "Antigravity built-in AI (only inside the Antigravity host).",
-              "Anthropic Claude direct (set key via 'Vibe Check: Set API Key...').",
-              "Google Gemini direct (set key via 'Vibe Check: Set API Key...').",
-              "OpenAI direct (set key via 'Vibe Check: Set API Key...').",
-              "OpenRouter aggregator, ~100+ models behind one key (set key via 'Vibe Check: Set API Key...')."
+              "Anthropic Claude direct (requires API key — see setup wizard).",
+              "Google Gemini direct (requires API key — see setup wizard).",
+              "OpenAI direct (requires API key — see setup wizard).",
+              "OpenRouter aggregator, ~100+ models behind one key (requires API key — see setup wizard)."
             ],
             "default": "auto",
             "order": 2,
-            "markdownDescription": "Which LLM backend Vibe Check uses. API keys for direct providers live in encrypted SecretStorage — set them with **`Vibe Check: Set API Key...`**. Pick a model with **`Vibe Check: Select Model...`**."
+            "markdownDescription": "Which LLM backend Vibe Check uses.\n\n**First time?** Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **`Vibe Check: Configure Provider`** — it walks you through picking a provider, pasting an API key (if needed), and choosing a model in one go.\n\nAPI keys are stored encrypted in VS Code SecretStorage — never in this `settings.json`."
           }
         }
       },
@@ -150,37 +221,37 @@
             "type": "string",
             "default": "",
             "order": 1,
-            "markdownDescription": "**Copilot** family override (e.g. `gpt-4o`, `claude-3.5-sonnet`). Leave empty to use the default. Pick interactively with **`Vibe Check: Select Model...`**."
+            "markdownDescription": "Model override for **Copilot** (e.g. `gpt-4o`, `claude-3.5-sonnet`). Leave empty to use the default.\n\n📌 *Don't paste an API key here — this is for the model id only. Copilot uses your GitHub Copilot subscription, no API key needed.*"
           },
           "vibeCheck.antigravityModel": {
             "type": "string",
             "default": "",
             "order": 2,
-            "markdownDescription": "**Antigravity** model override (e.g. `gemini-3-flash`). Leave empty to use the default."
+            "markdownDescription": "Model override for **Antigravity** (e.g. `gemini-3-flash`). Leave empty to use the default.\n\n📌 *No API key needed — Antigravity provides the model when you run inside that host.*"
           },
           "vibeCheck.anthropicModel": {
             "type": "string",
             "default": "",
             "order": 3,
-            "markdownDescription": "**Anthropic** model id (e.g. `claude-sonnet-4-6`, `claude-opus-4-7`). Leave empty for default. Get a key at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys), then run **`Vibe Check: Set API Key...`**."
+            "markdownDescription": "Model override for **Anthropic** (e.g. `claude-sonnet-4-6`, `claude-opus-4-7`). Leave empty to use the default.\n\n🔑 **API key setup**: get a key at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys), then open the Command Palette (`Ctrl+Shift+P`) and run **`Vibe Check: Configure Provider`**. Your key is stored encrypted, never in this file.\n\n📌 *Don't paste your API key into this field — this field is for the **model id** only.*"
           },
           "vibeCheck.geminiModel": {
             "type": "string",
             "default": "",
             "order": 4,
-            "markdownDescription": "**Gemini** model id (e.g. `gemini-3-flash-preview`, `gemini-3.1-pro-preview`, `gemini-2.5-flash`). Leave empty for default. Get a key at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey), then run **`Vibe Check: Set API Key...`**."
+            "markdownDescription": "Model override for **Gemini** (e.g. `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`). Leave empty to use the default (`gemini-2.5-flash`, free-tier accessible).\n\n🔑 **API key setup**: get a key at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey), then open the Command Palette (`Ctrl+Shift+P`) and run **`Vibe Check: Configure Provider`**. Your key is stored encrypted, never in this file.\n\n📌 *Don't paste your API key into this field — this field is for the **model id** only.*"
           },
           "vibeCheck.openaiModel": {
             "type": "string",
             "default": "",
             "order": 5,
-            "markdownDescription": "**OpenAI** model id (e.g. `gpt-5.5`, `gpt-5.4-mini`, `gpt-4o`). Leave empty for default. Get a key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys), then run **`Vibe Check: Set API Key...`**."
+            "markdownDescription": "Model override for **OpenAI** (e.g. `gpt-5.5`, `gpt-5.4-mini`, `gpt-4o`). Leave empty to use the default.\n\n🔑 **API key setup**: get a key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys), then open the Command Palette (`Ctrl+Shift+P`) and run **`Vibe Check: Configure Provider`**. Your key is stored encrypted, never in this file.\n\n📌 *Don't paste your API key into this field — this field is for the **model id** only.*"
           },
           "vibeCheck.openrouterModel": {
             "type": "string",
             "default": "",
             "order": 6,
-            "markdownDescription": "**OpenRouter** model id (e.g. `anthropic/claude-sonnet-4-6`, browse the [model catalog](https://openrouter.ai/models)). Leave empty for default. Get a key at [openrouter.ai/keys](https://openrouter.ai/keys), then run **`Vibe Check: Set API Key...`**."
+            "markdownDescription": "Model override for **OpenRouter** (e.g. `anthropic/claude-sonnet-4-6`, browse the [model catalog](https://openrouter.ai/models)). Leave empty to use the default.\n\n🔑 **API key setup**: get a key at [openrouter.ai/keys](https://openrouter.ai/keys), then open the Command Palette (`Ctrl+Shift+P`) and run **`Vibe Check: Configure Provider`**. Your key is stored encrypted, never in this file.\n\n📌 *Don't paste your API key into this field — this field is for the **model id** only.*"
           }
         }
       }

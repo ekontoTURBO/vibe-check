@@ -39,6 +39,39 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	})();
 
+	// First-run welcome — open the Get Started walkthrough so the user sees a guided
+	// onboarding instead of having to discover the wizard via the command palette.
+	void (async () => {
+		const FLAG_KEY = 'vibeCheck.welcomeShown.v2';
+		if (context.globalState.get<boolean>(FLAG_KEY)) {
+			return;
+		}
+		void context.globalState.update(FLAG_KEY, true);
+		// Wait briefly for the workbench to fully initialize before opening.
+		await new Promise((r) => setTimeout(r, 1200));
+		try {
+			await vscode.commands.executeCommand(
+				'workbench.action.openWalkthrough',
+				{
+					category: 'cognitra.vibe-check#vibeCheck.gettingStarted',
+					step: 'cognitra.vibe-check#vibeCheck.gettingStarted#setup-provider',
+				},
+				false
+			);
+		} catch (err) {
+			// Walkthrough API not supported by this host — fall back to the toast.
+			console.warn('[VibeCheck] openWalkthrough failed, falling back to toast:', err);
+			const choice = await vscode.window.showInformationMessage(
+				'Welcome to Vibe Check! Set up an AI provider to start generating quizzes.',
+				'Set up now',
+				'Later'
+			);
+			if (choice === 'Set up now') {
+				await vscode.commands.executeCommand('vibeCheck.configureProvider');
+			}
+		}
+	})();
+
 	const llm = new LLMService(registry);
 	const teacher = new TeacherProvider(llm);
 	const fsrs = new FSRSManager(context);
@@ -296,6 +329,13 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			await fsrs.setActiveTrack(choice.label as Track);
 			sidebar.refresh();
+		}),
+		vscode.commands.registerCommand('vibeCheck.openWalkthrough', async () => {
+			await vscode.commands.executeCommand(
+				'workbench.action.openWalkthrough',
+				'cognitra.vibe-check#vibeCheck.gettingStarted',
+				false
+			);
 		}),
 		vscode.commands.registerCommand('vibeCheck.resetProgress', async () => {
 			const choice = await vscode.window.showWarningMessage(
