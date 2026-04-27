@@ -3,16 +3,16 @@
   "displayName": "Vibe Check",
   "description": "Anti-vibe-coding mentor. When AI writes code for you, Vibe Check turns it into a Duolingo-style quiz so you actually understand it.",
   "version": "0.0.1",
-  "publisher": "TODO-set-your-marketplace-publisher-id",
+  "publisher": "cognitra",
   "license": "MIT",
   "icon": "media/icon.png",
-  "homepage": "https://github.com/TODO-your-org/vibe-check#readme",
+  "homepage": "https://github.com/ekontoTURBO/vibe-check#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TODO-your-org/vibe-check.git"
+    "url": "https://github.com/ekontoTURBO/vibe-check.git"
   },
   "bugs": {
-    "url": "https://github.com/TODO-your-org/vibe-check/issues"
+    "url": "https://github.com/ekontoTURBO/vibe-check/issues"
   },
   "engines": {
     "vscode": "^1.95.0"
@@ -203,7 +203,7 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "@types/vscode": "^1.116.0",
+    "@types/vscode": "^1.95.0",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
     "esbuild": "^0.27.3",

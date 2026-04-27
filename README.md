@@ -31,7 +31,7 @@ Open the Extensions panel, search **Vibe Check**, click Install.
 
 Vibe Check is published to [Open VSX](https://open-vsx.org/), not Microsoft's Marketplace. To install in the official VS Code:
 
-1. Download the latest `.vsix` from the [Open VSX page](https://open-vsx.org/extension/eryk-czekalski/vibe-check)
+1. Download the latest `.vsix` from the [Open VSX page](https://open-vsx.org/extension/cognitra/vibe-check)
 2. In VS Code: **Extensions panel → "..." menu → Install from VSIX...** → pick the file
 
 Or via terminal:
