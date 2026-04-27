@@ -5,6 +5,103 @@ import { Capabilities, Topic } from './types';
 const MAX_FILE_BYTES = 5000;
 const MAX_TOTAL_BYTES = 16000;
 
+/** Files we look for when generating Infrastructure / Security modules. Order matters — earlier wins on tie. */
+const INFRASTRUCTURE_CANDIDATES: string[] = [
+	// JavaScript / TypeScript
+	'package.json',
+	'tsconfig.json',
+	'jsconfig.json',
+	'eslint.config.mjs',
+	'eslint.config.js',
+	'.eslintrc.json',
+	'biome.json',
+	'.prettierrc',
+	'.prettierrc.json',
+	'esbuild.js',
+	'vite.config.ts',
+	'vite.config.js',
+	'webpack.config.js',
+	'rollup.config.js',
+	'next.config.js',
+	'next.config.ts',
+	'turbo.json',
+	'nx.json',
+	'jest.config.ts',
+	'jest.config.js',
+	'vitest.config.ts',
+	'vitest.config.js',
+	'tailwind.config.js',
+	'tailwind.config.ts',
+	'postcss.config.js',
+	'babel.config.js',
+	'.swcrc',
+	// Bun / Deno
+	'bunfig.toml',
+	'deno.json',
+	'deno.jsonc',
+	// Python
+	'pyproject.toml',
+	'requirements.txt',
+	'setup.py',
+	'setup.cfg',
+	'Pipfile',
+	'poetry.lock',
+	// Rust
+	'Cargo.toml',
+	// Go
+	'go.mod',
+	// Java / Kotlin / JVM
+	'pom.xml',
+	'build.gradle',
+	'build.gradle.kts',
+	'settings.gradle',
+	'settings.gradle.kts',
+	// .NET
+	'global.json',
+	'Directory.Build.props',
+	// Ruby
+	'Gemfile',
+	'Rakefile',
+	// PHP
+	'composer.json',
+	// C / C++
+	'CMakeLists.txt',
+	'Makefile',
+	'conanfile.txt',
+	'vcpkg.json',
+	// Swift / iOS / macOS
+	'Package.swift',
+	'Podfile',
+	// Elixir / Erlang
+	'mix.exs',
+	'rebar.config',
+	// Haskell
+	'package.yaml',
+	'stack.yaml',
+	// Dart / Flutter
+	'pubspec.yaml',
+	// Containers
+	'Dockerfile',
+	'docker-compose.yml',
+	'docker-compose.yaml',
+	'.dockerignore',
+	// CI
+	'.github/workflows/ci.yml',
+	'.gitlab-ci.yml',
+	'.circleci/config.yml',
+	'azure-pipelines.yml',
+	'Jenkinsfile',
+	'.drone.yml',
+	'.travis.yml',
+	// Editor / repo standards
+	'.editorconfig',
+	'.gitattributes',
+];
+
+/** Regex used by the last-chance scan for any config-shaped file at workspace root. */
+const CONFIG_FILE_PATTERN =
+	/^(\.[^/]+|.+\.(json|jsonc|yaml|yml|toml|ini|conf))$|^Makefile$|^Dockerfile.*|^[A-Z][a-zA-Z]+file$|.+\.(gradle|gradle\.kts|gemspec|cabal)$/;
+
 export interface GatheredContext {
 	label: string;
 	content: string;
@@ -94,26 +191,7 @@ export class ContextGatherer {
 	}
 
 	private async gatherInfrastructure(): Promise<GatheredContext> {
-		const candidates = [
-			'package.json',
-			'tsconfig.json',
-			'esbuild.js',
-			'vite.config.ts',
-			'vite.config.js',
-			'webpack.config.js',
-			'.eslintrc.json',
-			'eslint.config.mjs',
-			'next.config.js',
-			'next.config.ts',
-			'Dockerfile',
-			'docker-compose.yml',
-			'.github/workflows/ci.yml',
-			'pyproject.toml',
-			'requirements.txt',
-			'Cargo.toml',
-			'go.mod',
-		];
-		return this.collectFiles(candidates, 'Infrastructure & build configuration');
+		return this.collectFiles(INFRASTRUCTURE_CANDIDATES, 'Infrastructure & build configuration');
 	}
 
 	private async gatherTools(): Promise<GatheredContext> {
@@ -165,7 +243,7 @@ export class ContextGatherer {
 				lineRange: { start: 0, end: editor.document.lineCount - 1 },
 			};
 		}
-		return this.collectFiles(['package.json', 'tsconfig.json'], 'Security review of project config');
+		return this.collectFiles(INFRASTRUCTURE_CANDIDATES, 'Security review of project config');
 	}
 
 	private async collectFiles(paths: string[], label: string): Promise<GatheredContext> {
@@ -189,12 +267,47 @@ export class ContextGatherer {
 			total += trimmed.length;
 		}
 		if (parts.length === 0) {
-			throw new Error('No relevant config files found in the workspace.');
+			// Last-chance scan: glob for any small config-shaped file at workspace root.
+			const fallback = await this.scanWorkspaceForConfigs(root);
+			if (fallback.length === 0) {
+				throw new Error(
+					`No config files found at workspace root. Vibe Check looked for: ${paths.slice(0, 8).join(', ')} and ${paths.length - 8} more. ` +
+						'Try the Code or Architecture topic instead, or open a project that has a build/config file.'
+				);
+			}
+			return { label, content: fallback.join('\n\n') };
 		}
 		return {
 			label,
 			content: parts.join('\n\n'),
 		};
+	}
+
+	private async scanWorkspaceForConfigs(root: vscode.Uri): Promise<string[]> {
+		try {
+			const entries = await vscode.workspace.fs.readDirectory(root);
+			const candidates = entries
+				.filter(([name, type]) => type === vscode.FileType.File && CONFIG_FILE_PATTERN.test(name))
+				.map(([name]) => name)
+				.slice(0, 6);
+			const parts: string[] = [];
+			let total = 0;
+			for (const name of candidates) {
+				if (total >= MAX_TOTAL_BYTES) {
+					break;
+				}
+				const file = await this.readFile(vscode.Uri.joinPath(root, name));
+				if (!file) {
+					continue;
+				}
+				const trimmed = this.truncate(file, MAX_FILE_BYTES);
+				parts.push(`=== ${name} ===\n${trimmed}`);
+				total += trimmed.length;
+			}
+			return parts;
+		} catch {
+			return [];
+		}
 	}
 
 	private async readWorkspaceFile(rel: string): Promise<{ path: string; content: string } | null> {

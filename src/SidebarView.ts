@@ -13,14 +13,16 @@ import {
 	Track,
 } from './types';
 
-const GLOW_DECORATION: vscode.DecorationRenderOptions = {
-	backgroundColor: 'rgba(255, 215, 0, 0.18)',
-	border: '1px solid rgba(255, 215, 0, 0.55)',
-	borderRadius: '3px',
-	overviewRulerColor: 'rgba(255, 215, 0, 0.85)',
-	overviewRulerLane: vscode.OverviewRulerLane.Right,
-	isWholeLine: true,
-};
+function buildGlowDecoration(): vscode.DecorationRenderOptions {
+	return {
+		backgroundColor: 'rgba(255, 215, 0, 0.18)',
+		border: '1px solid rgba(255, 215, 0, 0.55)',
+		borderRadius: '3px',
+		overviewRulerColor: 'rgba(255, 215, 0, 0.85)',
+		overviewRulerLane: vscode.OverviewRulerLane.Right,
+		isWholeLine: true,
+	};
+}
 
 export type FinalizeHandler = (questionId: string, outcome: 'correct' | 'wrong') => Promise<void>;
 export type LessonStartHandler = (
@@ -78,7 +80,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
 		private readonly extensionUri: vscode.Uri,
 		private readonly fsrs: FSRSManager
 	) {
-		this.decoration = vscode.window.createTextEditorDecorationType(GLOW_DECORATION);
+		this.decoration = vscode.window.createTextEditorDecorationType(buildGlowDecoration());
 	}
 
 	resolveWebviewView(view: vscode.WebviewView): void {
