@@ -284,6 +284,19 @@ export class SidebarView implements vscode.WebviewViewProvider {
 			case 'revealSnippet':
 				await this.revealSnippet(msg.snippet, msg.file);
 				return;
+			case 'openExternal': {
+				// Whitelist scheme to avoid any chance of `file://` or `command:` shenanigans.
+				try {
+					const parsed = vscode.Uri.parse(msg.url, true);
+					if (parsed.scheme !== 'https' && parsed.scheme !== 'http') {
+						return;
+					}
+					await vscode.env.openExternal(parsed);
+				} catch (err) {
+					console.error('[VibeCheck] openExternal failed:', err);
+				}
+				return;
+			}
 			case 'dismissPulse':
 				this.pulse = null;
 				await this.pushState();
@@ -778,6 +791,7 @@ type ClientMessage =
 	| { type: 'exitLesson' }
 	| { type: 'revealLines'; file: string; startLine: number; endLine: number }
 	| { type: 'revealSnippet'; snippet: string; file?: string }
+	| { type: 'openExternal'; url: string }
 	| { type: 'dismissPulse' }
 	| { type: 'dismissError' }
 	| { type: 'completeAcknowledged' };

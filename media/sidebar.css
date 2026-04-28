@@ -1119,6 +1119,54 @@ button { font-family: inherit; }
 }
 
 /* ===========================================================
+   Footer — always-visible "Buy Me a Coffee" support link
+   =========================================================== */
+.vc-footer {
+	flex-shrink: 0;
+	border-top: 2px solid var(--vc-line);
+	background: var(--vc-bg-2);
+	padding: 4px 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.vc-footer__link {
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px;
+	font-family: var(--pixel);
+	font-size: 8px;
+	letter-spacing: 0.06em;
+	color: var(--vc-fg-mute);
+	transition: color 100ms steps(2), background 100ms steps(2);
+}
+
+.vc-footer__link:hover {
+	color: var(--vc-gold);
+	background: rgba(255, 210, 63, 0.08);
+}
+
+.vc-footer__link:active {
+	transform: translateY(1px);
+}
+
+.vc-footer__icon {
+	font-size: 10px;
+	color: var(--vc-pink);
+	line-height: 1;
+}
+
+.vc-footer__chev {
+	font-size: 8px;
+	opacity: 0.6;
+}
+
+/* ===========================================================
    Animations
    =========================================================== */
 @keyframes pixel-pulse {

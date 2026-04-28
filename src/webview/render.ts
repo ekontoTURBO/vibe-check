@@ -9,6 +9,7 @@ import { renderLessonScreen } from './components/lesson';
 import { renderComplete } from './components/complete';
 import { renderPicker } from './components/picker';
 import { renderPulse } from './components/pulse';
+import { renderFooter } from './components/footer';
 
 function generatingOverlay(state: ViewState): HTMLElement {
 	const label = state.generatingTopic
@@ -81,4 +82,5 @@ export function render(rootEl: HTMLElement, state: ViewState): void {
 
 	screen.appendChild(renderScreenBody(state));
 	rootEl.appendChild(screen);
+	rootEl.appendChild(renderFooter());
 }

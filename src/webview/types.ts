@@ -128,6 +128,7 @@ export type ClientMessage =
 	| { type: 'exitLesson' }
 	| { type: 'revealLines'; file: string; startLine: number; endLine: number }
 	| { type: 'revealSnippet'; snippet: string; file?: string }
+	| { type: 'openExternal'; url: string }
 	| { type: 'dismissPulse' }
 	| { type: 'dismissError' }
 	| { type: 'completeAcknowledged' };

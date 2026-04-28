@@ -4,6 +4,11 @@ All notable changes to Vibe Check are documented here.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4]
+
+### Added
+- Persistent **Buy Me a Coffee** footer in the sidebar — small pixel-style link, always visible at the bottom regardless of which screen you're on. Clicking it opens the support page in your default browser via `vscode.env.openExternal` (the secure host-side path; the URL never bypasses the webview/host boundary)
+
 ## [0.0.3]
 
 ### Security
