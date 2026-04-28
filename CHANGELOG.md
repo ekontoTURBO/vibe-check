@@ -4,12 +4,20 @@ All notable changes to Vibe Check are documented here.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6]
+
+### Changed
+- **Quizzes are now scoped per project**, not global. When you open a different workspace, you'll see zero quizzes — only the ones you generated in *that* project. This was the most-requested behavior change because seeing modules from unrelated codebases in your current project's sidebar made no sense (and the 📍 SHOW button often pointed to files that weren't in the workspace).
+  - **Per-project (workspace state)**: modules, lesson questions, FSRS review cards
+  - **Global (user state, syncs across devices)**: XP, streak, daily progress, active track — that's *you*, not the project
+- **Migration note**: existing modules saved before v0.0.6 lived in global state. After upgrading, those modules become orphaned (not deleted, just invisible) since no workspace claims them. Easy cleanup: run `Vibe Check: Reset Progress` once to wipe both layers, then start fresh per workspace.
+
 ## [0.0.5]
 
 ### Added
 - **Fill-in-the-blank questions** — third question type. Code snippet shown with a highlighted gap; pick from a/b/c/d what completes it. Used for control-flow conditions, expression choices, missing args
 - **Drag-and-drop reorder** for code-order questions. Replaces the ▲/▼ arrow buttons. Cyan drop indicator above/below target row. Drag handle (⋮⋮) on the left of every row
-- **Inline code preview for MC questions** — when a multiple-choice question references a `lineRange`, the actual code block now renders directly in the question card. Click 📍 SHOW to jump to it in the editor
+- **Inline code preview for MC questions** — when a multiple-choice question references a `lineRange`, the actual code block now renders directly in the question card. Code-frame has a header bar with line range chip and 📍 SHOW button (no longer overlaps the code), wraps instead of horizontal-scrolling
 - **Multi-topic auto-fired modules** — when an AI agent inserts a chunk and Vibe Check auto-fires, lessons now span different angles (code → security → architecture → tools → code-deep) instead of all being about the same topic. Manual modules from the picker stay single-topic
 - **Dynamic lesson and question counts** — the module now scales to the size of the inserted code:
   - `< 800 chars` → 2 lessons × 3 questions (= 6 total)
@@ -17,17 +25,25 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
   - `< 6000 chars` → 4 × 5 (= 20)
   - `≥ 6000 chars` → 5 × 5 (= 25)
   Tiny dumps no longer get padded with trivia just to fill 25 questions
+- **New Glitch mascot** — full redesign on an 18×16 grid. Single big screen-eye, antenna LED that recolors per mood, hard drop shadow. 9 moods now (added `focus`, `sleep`, `load` for future states) composed from base + eye + mouth + antenna overlays
+- **New marketplace icon** — generated from the new mascot's WIN mood (star eyes + grin)
+- **Idle mascot in README** — centered hero image
+- **Marketplace screenshots** — 5 curated screenshots in `media/screenshots/` covering home, module path, MC question, wrong-answer feedback, and lesson complete
+- **Dismissible error banner** — errors now have an explicit ✕ close button on the right; clicking the message body no longer dismisses (so you can read the full text)
 
 ### Changed
 - **Major lesson-prompt overhaul.** Hard quality rules now baked into the prompt: NEVER ask about variable names, comments, color values, casing, line counts, magic numbers, string literals, or filenames. ALWAYS ask about behavior, control flow, edge cases, side effects, and design intent. MC questions are now required to reference a meaningful code block (≥3 lines), not a single token
-- Lesson prompt explicitly tells the model: "If the context truly doesn't support that many high-quality questions, return fewer (minimum 2). Better to have 3 sharp questions than 5 with trivia"
-- Context prompt now instructs the model to skip imports, license headers, and pure constants when picking what to quiz on
+- **Architecture topic now reads entry-point files**, not just the directory tree. Pulls in `package.json` (trimmed), `tsconfig.json`, `README.md`, `src/index.ts`, `src/extension.ts`, `Cargo.toml`, `go.mod`, etc. — gives the model real substance to quiz on instead of a folder list
+- **Anti-refusal directive** in the lesson prompt — the model is now explicitly told NOT to return prose excuses about thin context. Even minimal context supports questions about file roles, directory ownership, config flag meaning. Combined with a refusal-detector in the parser that surfaces a friendlier error message
+- **Option-shuffle** — multiple-choice and fill-blank options are now shuffled with a seeded Fisher-Yates after the model returns. Defeats the well-known LLM bias toward `correctIndex: 0`. Distribution is now ~25% each across A/B/C/D
 - Token budget for lesson generation now scales with question count instead of a flat 1500
 - Skeleton prompt now generates the requested lesson count instead of always emitting 5
 - Module success toast shows actual lesson count instead of hardcoded "5"
 
 ### Fixed
 - `MultipleChoiceQuestion`'s `lineRange` was previously dead — the `codeForMC` constant in `lesson.ts` was always `undefined` regardless of input. Now properly slices the referenced lines from the module context and renders them inline
+- **📍 SHOW highlight stuck after first click** — `setDecorations` was being called on a stale editor handle when the doc was already open, causing subsequent clicks to scroll without re-painting the highlight. Now clears all glows first, prefers `activeTextEditor`, defers the decoration to next tick
+- **Sidebar scrolled to top on every option click** — the renderer was creating a fresh `#vc-screen` element each render, resetting `scrollTop`. Now snapshots scroll position before re-render and restores it on the new node, keyed per screen so navigating between Q1 → Q2 still starts at top
 
 ## [0.0.4]
 

@@ -57,7 +57,7 @@ export class FSRSManager {
 	addModule(module: Module): void {
 		const modules = this.loadModules();
 		modules.push(module);
-		void this.context.globalState.update(MODULES_KEY, modules);
+		void this.context.workspaceState.update(MODULES_KEY, modules);
 	}
 
 	getModule(id: string): Module | undefined {
@@ -95,7 +95,7 @@ export class FSRSManager {
 			return;
 		}
 		l.questions = questions;
-		void this.context.globalState.update(MODULES_KEY, modules);
+		void this.context.workspaceState.update(MODULES_KEY, modules);
 
 		const cards = this.loadCards();
 		for (const q of questions) {
@@ -155,7 +155,7 @@ export class FSRSManager {
 			}
 		}
 
-		void this.context.globalState.update(MODULES_KEY, modules);
+		void this.context.workspaceState.update(MODULES_KEY, modules);
 		return { passed };
 	}
 
@@ -268,17 +268,23 @@ export class FSRSManager {
 	}
 
 	async resetAll(): Promise<void> {
-		await this.context.globalState.update(CARDS_KEY, []);
-		await this.context.globalState.update(MODULES_KEY, []);
+		// Per-project data
+		await this.context.workspaceState.update(CARDS_KEY, []);
+		await this.context.workspaceState.update(MODULES_KEY, []);
+		// User-level data
 		await this.context.globalState.update(PROGRESS_KEY, undefined);
+		// Drop legacy globalState entries from before the per-project migration so
+		// they don't bleed back in via the loadModulesLegacy() fallback below.
+		await this.context.globalState.update(CARDS_KEY, undefined);
+		await this.context.globalState.update(MODULES_KEY, undefined);
 	}
 
 	private loadModules(): Module[] {
-		return this.context.globalState.get<Module[]>(MODULES_KEY) ?? [];
+		return this.context.workspaceState.get<Module[]>(MODULES_KEY) ?? [];
 	}
 
 	private loadCards(): StoredCard[] {
-		const raw = this.context.globalState.get<SerializedStoredCard[]>(CARDS_KEY) ?? [];
+		const raw = this.context.workspaceState.get<SerializedStoredCard[]>(CARDS_KEY) ?? [];
 		return raw.map((r) => ({
 			question: r.question,
 			card: {
@@ -298,8 +304,9 @@ export class FSRSManager {
 				last_review: c.card.last_review?.toISOString(),
 			},
 		}));
-		void this.context.globalState.update(CARDS_KEY, serialized);
-		void this.context.globalState.setKeysForSync([CARDS_KEY, PROGRESS_KEY, MODULES_KEY]);
+		void this.context.workspaceState.update(CARDS_KEY, serialized);
+		// Only sync user-level XP/streak across devices — not per-project quizzes.
+		void this.context.globalState.setKeysForSync([PROGRESS_KEY]);
 	}
 }
 
