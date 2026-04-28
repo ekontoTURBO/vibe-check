@@ -49,148 +49,144 @@ export function pixelGrid(
 }
 
 /* ============================================================
-   GLITCH — the Vibe Check mascot (16x16, 6 moods)
+   GLITCH — the Vibe Check mascot (18 rows x 16 cols, 9 moods)
+   Composed from a static body silhouette + eye overlay + mouth
+   overlay + antenna LED. The body never changes, so Glitch always
+   looks like Glitch regardless of mood.
    ============================================================ */
 
 export const GLITCH_PALETTE: PaletteMap = {
 	'.': 'transparent',
-	'0': '#1a1a1a',
-	'1': '#ff77b8',
-	'2': '#c84d8e',
-	'3': '#ffffff',
-	'4': '#1a1a1a',
-	'5': '#ffd23f',
-	'6': '#4ec9ff',
-	'7': '#7a2851',
-	'8': '#6fdc7a',
-	'9': '#ff5a6a',
-	'a': '#ffb3d4',
+	'0': '#1a1a1a',  // outline / pupil
+	'1': '#ff77b8',  // body pink (brand)
+	'2': '#c84d8e',  // body shadow
+	'3': '#ffffff',  // eye highlight
+	'4': '#1a1a1a',  // pupil (alias of 0)
+	'5': '#ffd23f',  // gold (antenna LED, stars)
+	'6': '#4ec9ff',  // screen cyan
+	'7': '#0a0a0a',  // hard drop shadow
+	'8': '#6fdc7a',  // green (happy / correct)
+	'9': '#ff5a6a',  // red (sad / error)
+	'a': '#ffb3d4',  // body highlight
+	'b': '#2b7fa8',  // screen deep shadow
+	'c': '#7a2851',  // body deep shadow
 };
 
-const GLITCH_IDLE = `
-................
-................
+const GLITCH_BASE = `
+.......55.......
+.......55.......
+.......00.......
+......0550......
 .000000000000...
-.0aaaaaaaaaa0...
-.01111111111027.
-.0166666666612.7
-.0163333333312..
-.0163400340312..
-.0163443344312..
-.0163400340312..
-.0163333333312..
-.01666666666127.
-.0111111111112..
-.0111155551112..
-.02222222222227.
+.0aaaaaaaaaa0c..
+.0066666666600c.
+.0066666666600c7
+.0066666666600c.
+.0066666666600c7
+.0066666666600c.
+.0066666666600c7
+.0a1111111112c7.
+.0111111111112c.
+.0c1111111111c7.
+.0cccccccccccc7.
 ..7777777777777.
+.7..............
 `;
 
-const GLITCH_HAPPY = `
-................
-................
-.000000000000...
-.0aaaaaaaaaa0...
-.01111111111027.
-.0166666666612.7
-.0163333333312..
-.0163008008312..
-.0163008008312..
-.0163008008312..
-.0163333333312..
-.01666688866127.
-.0111188888112..
-.0111155551112..
-.02222222222227.
-..7777777777777.
-`;
-
-const GLITCH_SAD = `
-................
-................
-.000000000000...
-.0aaaaaaaaaa0...
-.01111111111027.
-.0166666666612.7
-.0163333333312..
-.0163443344312..
-.0163400440312..
-.0163400440312..
-.0163333333312..
-.01666666666127.
-.0111199999112..
-.0111159995112..
-.02222222222227.
-..7777777777777.
-`;
-
-const GLITCH_SURPRISE = `
-................
-................
-.000000000000...
-.0aaaaaaaaaa0...
-.01111111111027.
-.0166666666612.7
-.0163333333312..
-.0163040040312..
-.0163040040312..
-.0163040040312..
-.0163333333312..
-.01666666666127.
-.0111199911112..
-.0111199911112..
-.02222222222227.
-..7777777777777.
-`;
-
-const GLITCH_THINK = `
-................
-................
-.000000000000.55
-.0aaaaaaaaaa0.5.
-.0111111111102.5
-.0166666666612.7
-.0163333333312..
-.0163004400312..
-.0163004400312..
-.0163400040312..
-.0163333333312..
-.01666666666127.
-.0111111551112..
-.0111155555112..
-.02222222222227.
-..7777777777777.
-`;
-
-const GLITCH_WIN = `
-................
-.....55....55...
-....5..5..5..5..
-.000000000000...
-.0aaaaaaaaaa0...
-.01111111111027.
-.0166666666612.7
-.0163338833312..
-.0163088880312..
-.0163088880312..
-.0163338833312..
-.01666666666127.
-.0111188888112..
-.0111155551112..
-.02222222222227.
-..7777777777777.
-`;
-
-export type GlitchMood = 'idle' | 'happy' | 'sad' | 'surprise' | 'think' | 'win';
-
-const MOODS: Record<GlitchMood, string> = {
-	idle: GLITCH_IDLE,
-	happy: GLITCH_HAPPY,
-	sad: GLITCH_SAD,
-	surprise: GLITCH_SURPRISE,
-	think: GLITCH_THINK,
-	win: GLITCH_WIN,
+/* Eye overlays — 8 wide x 6 tall, painted into rows 6-11 cols 4-11.
+   '.' leaves the underlying screen cyan untouched. */
+const EYES: Record<string, string[]> = {
+	open: ['...00...', '..0440..', '.044440.', '.043440.', '..0440..', '...00...'],
+	up:   ['..0440..', '.044340.', '.044440.', '..0440..', '...00...', '........'],
+	side: ['........', '....000.', '...0440.', '...0430.', '....000.', '........'],
+	closed: ['........', '........', '.0....0.', '00....00', '.000000.', '........'],
+	sad:  ['.000000.', '0......0', '...00...', '..0440..', '...00...', '........'],
+	wide: ['..0000..', '.044440.', '.044340.', '.044440.', '.044440.', '..0000..'],
+	star: ['...55...', '..5555..', '.555555.', '.555555.', '..5555..', '...55...'],
+	focus: ['00000000', '00000000', '...00...', '..0440..', '...00...', '........'],
+	sleep: ['..0000..', '0....50.', '....50..', '...50000', '..00000.', '........'],
+	load:  ['........', '00000000', '........', '00000000', '........', '00000000'],
 };
+
+/* Mouth overlays — 8 wide x 2 tall, painted into rows 13-14 cols 4-11. */
+const MOUTHS: Record<string, string[]> = {
+	flat:     ['........', '..0000..'],
+	smile:    ['.0....0.', '..0000..'],
+	bigsmile: ['.000000.', '.088880.'],
+	frown:    ['..0000..', '.0....0.'],
+	o:        ['..0000..', '..0990..'],
+	wave:     ['.0.00.0.', '..0..0..'],
+	grin:     ['.000000.', '.000000.'],
+};
+
+/* Antenna LED color (palette key, applied to row 3 cols 7-8). */
+const ANTENNA: Record<string, string> = {
+	default: '5',
+	red:     '9',
+	green:   '8',
+	cyan:    '6',
+	off:     '2',
+};
+
+interface MoodRecipe {
+	eyes: keyof typeof EYES;
+	mouth: keyof typeof MOUTHS;
+	antenna?: keyof typeof ANTENNA;
+}
+
+const MOOD_RECIPES = {
+	idle:     { eyes: 'open',   mouth: 'flat',     antenna: 'default' },
+	happy:    { eyes: 'closed', mouth: 'bigsmile', antenna: 'green'   },
+	sad:      { eyes: 'sad',    mouth: 'frown',    antenna: 'off'     },
+	surprise: { eyes: 'wide',   mouth: 'o',        antenna: 'red'     },
+	think:    { eyes: 'side',   mouth: 'wave',     antenna: 'cyan'    },
+	win:      { eyes: 'star',   mouth: 'grin',     antenna: 'default' },
+	focus:    { eyes: 'focus',  mouth: 'flat',     antenna: 'default' },
+	sleep:    { eyes: 'sleep',  mouth: 'flat',     antenna: 'off'     },
+	load:     { eyes: 'load',   mouth: 'flat',     antenna: 'cyan'    },
+} as const satisfies Record<string, MoodRecipe>;
+
+export type GlitchMood = keyof typeof MOOD_RECIPES;
+
+function composeGlitch(recipe: MoodRecipe): string {
+	const rows = GLITCH_BASE.trim().split('\n').map((r) => r.split(''));
+
+	// Antenna LED — row 3, cols 7-8
+	const led = ANTENNA[recipe.antenna ?? 'default'];
+	rows[3][7] = led;
+	rows[3][8] = led;
+
+	// Eye overlay — 8 wide x 6 tall into rows 6-11, cols 4-11
+	const eye = EYES[recipe.eyes];
+	for (let dy = 0; dy < 6; dy++) {
+		for (let dx = 0; dx < 8; dx++) {
+			const c = eye[dy][dx];
+			if (c !== '.') {
+				rows[6 + dy][4 + dx] = c;
+			}
+		}
+	}
+
+	// Mouth overlay — rows 13-14, cols 4-11
+	const m = MOUTHS[recipe.mouth];
+	for (let dy = 0; dy < 2; dy++) {
+		for (let dx = 0; dx < 8; dx++) {
+			const c = m[dy][dx];
+			if (c !== '.') {
+				rows[13 + dy][4 + dx] = c;
+			}
+		}
+	}
+
+	return rows.map((r) => r.join('')).join('\n');
+}
+
+const MOODS: Record<GlitchMood, string> = Object.fromEntries(
+	(Object.entries(MOOD_RECIPES) as [GlitchMood, MoodRecipe][]).map(([k, recipe]) => [
+		k,
+		composeGlitch(recipe),
+	])
+) as Record<GlitchMood, string>;
 
 export function glitch(
 	mood: GlitchMood = 'idle',

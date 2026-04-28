@@ -4,6 +4,31 @@ All notable changes to Vibe Check are documented here.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5]
+
+### Added
+- **Fill-in-the-blank questions** — third question type. Code snippet shown with a highlighted gap; pick from a/b/c/d what completes it. Used for control-flow conditions, expression choices, missing args
+- **Drag-and-drop reorder** for code-order questions. Replaces the ▲/▼ arrow buttons. Cyan drop indicator above/below target row. Drag handle (⋮⋮) on the left of every row
+- **Inline code preview for MC questions** — when a multiple-choice question references a `lineRange`, the actual code block now renders directly in the question card. Click 📍 SHOW to jump to it in the editor
+- **Multi-topic auto-fired modules** — when an AI agent inserts a chunk and Vibe Check auto-fires, lessons now span different angles (code → security → architecture → tools → code-deep) instead of all being about the same topic. Manual modules from the picker stay single-topic
+- **Dynamic lesson and question counts** — the module now scales to the size of the inserted code:
+  - `< 800 chars` → 2 lessons × 3 questions (= 6 total)
+  - `< 2500 chars` → 3 × 4 (= 12)
+  - `< 6000 chars` → 4 × 5 (= 20)
+  - `≥ 6000 chars` → 5 × 5 (= 25)
+  Tiny dumps no longer get padded with trivia just to fill 25 questions
+
+### Changed
+- **Major lesson-prompt overhaul.** Hard quality rules now baked into the prompt: NEVER ask about variable names, comments, color values, casing, line counts, magic numbers, string literals, or filenames. ALWAYS ask about behavior, control flow, edge cases, side effects, and design intent. MC questions are now required to reference a meaningful code block (≥3 lines), not a single token
+- Lesson prompt explicitly tells the model: "If the context truly doesn't support that many high-quality questions, return fewer (minimum 2). Better to have 3 sharp questions than 5 with trivia"
+- Context prompt now instructs the model to skip imports, license headers, and pure constants when picking what to quiz on
+- Token budget for lesson generation now scales with question count instead of a flat 1500
+- Skeleton prompt now generates the requested lesson count instead of always emitting 5
+- Module success toast shows actual lesson count instead of hardcoded "5"
+
+### Fixed
+- `MultipleChoiceQuestion`'s `lineRange` was previously dead — the `codeForMC` constant in `lesson.ts` was always `undefined` regardless of input. Now properly slices the referenced lines from the module context and renders them inline
+
 ## [0.0.4]
 
 ### Added

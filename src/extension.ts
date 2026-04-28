@@ -10,6 +10,7 @@ import { ProviderSecrets } from './providers/secrets';
 import { ProviderRegistry } from './providers/registry';
 import { registerProviderCommands } from './providers/commands';
 import { PROVIDER_LABELS } from './providers/types';
+import { pickMixedTopics, sizeForContext } from './TeacherProvider';
 import {
 	Question,
 	QuizSession,
@@ -93,7 +94,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const generateModule = async (
 		topic: Topic,
-		opts?: { explicitCode?: string; explicitFile?: string; explicitRange?: { start: number; end: number } }
+		opts?: {
+			explicitCode?: string;
+			explicitFile?: string;
+			explicitRange?: { start: number; end: number };
+			/** Auto-fired modules quiz the same code from multiple angles (one topic per lesson). */
+			mixed?: boolean;
+		}
 	): Promise<void> => {
 		if (inFlight) {
 			vscode.window.showInformationMessage('Vibe Check is already generating.');
@@ -105,6 +112,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 		try {
 			const ctx = await gatherer.gather(topic, opts);
+			const topicMix = opts?.mixed
+				? pickMixedTopics(sizeForContext(ctx.content.length).lessons)
+				: undefined;
 			const module = await teacher.generateModuleSkeleton({
 				topic,
 				track,
@@ -112,12 +122,13 @@ export function activate(context: vscode.ExtensionContext) {
 				contextLabel: ctx.label,
 				sourceFile: ctx.sourceFile,
 				baseLine: ctx.lineRange?.start ?? 0,
+				topicMix,
 			});
 			fsrs.addModule(module);
 			lastModuleAt = Date.now();
 			sidebar.openModule(module.id);
 			vscode.window.showInformationMessage(
-				`Vibe Check: created module "${module.title}" with 5 lessons.`
+				`Vibe Check: created module "${module.title}" with ${module.lessons.length} lesson${module.lessons.length === 1 ? '' : 's'}.`
 			);
 		} catch (err) {
 			const msg = (err as Error).message;
@@ -269,10 +280,12 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const codeSnippet = sliceSnippet(ev.document, ev.lineRange.start, ev.lineRange.end);
+		// Auto-fire = mix topic angles (code → security → architecture → tools → code-deep)
 		await generateModule('code', {
 			explicitCode: codeSnippet,
 			explicitFile: ev.document.fileName,
 			explicitRange: ev.lineRange,
+			mixed: true,
 		});
 	});
 
@@ -363,7 +376,7 @@ function sliceSnippet(doc: vscode.TextDocument, start: number, end: number): str
 }
 
 function describeCorrectAnswer(q: Question): string {
-	if (q.type === 'multiple-choice') {
+	if (q.type === 'multiple-choice' || q.type === 'fill-blank') {
 		return q.options[q.correctIndex];
 	}
 	return q.correctSequence.map((l, i) => `${i + 1}. ${l}`).join('\n');

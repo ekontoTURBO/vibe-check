@@ -109,7 +109,8 @@ export interface FeedbackUiState {
 
 export type AnswerPayload =
 	| { kind: 'multiple-choice'; choiceIndex: number }
-	| { kind: 'code-order'; sequence: string[] };
+	| { kind: 'code-order'; sequence: string[] }
+	| { kind: 'fill-blank'; choiceIndex: number };
 
 export type ClientMessage =
 	| { type: 'ready' }

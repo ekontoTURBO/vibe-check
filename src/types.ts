@@ -25,6 +25,8 @@ export interface BaseQuestion {
 	lessonId: string;
 	sourceFile?: string;
 	lineRange?: LineRange;
+	/** Inline code snippet shown alongside the question (sliced from module context using context-relative range). */
+	codeSnippet?: string;
 	createdAt: number;
 }
 
@@ -39,30 +41,45 @@ export interface CodeOrderQuestion extends BaseQuestion {
 	correctSequence: string[];
 }
 
-export type Question = MultipleChoiceQuestion | CodeOrderQuestion;
+export interface FillBlankQuestion extends BaseQuestion {
+	type: 'fill-blank';
+	codeBefore: string;
+	codeAfter: string;
+	options: string[];
+	correctIndex: number;
+}
+
+export type Question = MultipleChoiceQuestion | CodeOrderQuestion | FillBlankQuestion;
 export type QuestionType = Question['type'];
 
 export interface ModuleLesson {
 	id: string;
-	index: number; // 0..4
+	index: number;
 	title: string;
 	objective: string;
 	state: LessonState;
-	questions?: Question[]; // lazily generated
-	bestScore?: number; // best correct/total ratio achieved
+	/** Per-lesson topic. Defaults to module.topic when omitted (manual single-topic modules). */
+	topic?: Topic;
+	questions?: Question[];
+	bestScore?: number;
 }
 
 export interface Module {
 	id: string;
 	title: string;
+	/** Primary / display topic. For mixed modules, this is the first topic in the mix. */
 	topic: Topic;
 	track: Track;
-	lessons: ModuleLesson[]; // exactly 5
-	context: string; // saved for lazy lesson generation
+	lessons: ModuleLesson[];
+	context: string;
 	contextLabel: string;
 	sourceFile?: string;
 	baseLine: number;
 	createdAt: number;
+	/** Lessons spanning multiple topics — set for auto-fired modules. */
+	topicMix?: Topic[];
+	/** Number of questions to generate per lesson (dynamic based on context size). */
+	questionsPerLesson?: number;
 }
 
 export interface ModuleSummary {
@@ -127,7 +144,8 @@ export interface Capabilities {
 
 export type AnswerPayload =
 	| { kind: 'multiple-choice'; choiceIndex: number }
-	| { kind: 'code-order'; sequence: string[] };
+	| { kind: 'code-order'; sequence: string[] }
+	| { kind: 'fill-blank'; choiceIndex: number };
 
 export type WebviewMessage =
 	| { type: 'requestState' }

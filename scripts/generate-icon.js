@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
  * Generates media/icon.png — the Vibe Check Marketplace logo.
- * Renders Glitch (WIN mood, sparkles + happy face) on a VS-Code-dark
- * canvas. Pure Node, no new deps. Run with `node scripts/generate-icon.js`.
+ * Renders Glitch in the WIN mood (star eyes + grin) using the
+ * mascot composition system (18 rows x 16 cols).
+ *
+ * Pure Node, no new deps. Run with `node scripts/generate-icon.js`.
  */
 
 const fs = require('fs');
@@ -18,39 +20,74 @@ const PALETTE = {
 	'4': [26, 26, 26],
 	'5': [255, 210, 63],
 	'6': [78, 201, 255],
-	'7': [122, 40, 81],
+	'7': [10, 10, 10],
 	'8': [111, 220, 122],
 	'9': [255, 90, 106],
 	a: [255, 179, 212],
+	b: [43, 127, 168],
+	c: [122, 40, 81],
 };
 
-const WIN = `
-................
-.....55....55...
-....5..5..5..5..
+const GLITCH_BASE = `
+.......55.......
+.......55.......
+.......00.......
+......0550......
 .000000000000...
-.0aaaaaaaaaa0...
-.01111111111027.
-.0166666666612.7
-.0163338833312..
-.0163088880312..
-.0163088880312..
-.0163338833312..
-.01666666666127.
-.0111188888112..
-.0111155551112..
-.02222222222227.
+.0aaaaaaaaaa0c..
+.0066666666600c.
+.0066666666600c7
+.0066666666600c.
+.0066666666600c7
+.0066666666600c.
+.0066666666600c7
+.0a1111111112c7.
+.0111111111112c.
+.0c1111111111c7.
+.0cccccccccccc7.
 ..7777777777777.
-`
-	.trim()
-	.split('\n')
-	.map((r) => r.trim());
+.7..............
+`;
+
+// Eye overlay 8x6, painted into rows 6-11 cols 4-11
+const EYES_STAR = ['...55...', '..5555..', '.555555.', '.555555.', '..5555..', '...55...'];
+// Mouth overlay 8x2, painted into rows 13-14 cols 4-11
+const MOUTH_GRIN = ['.000000.', '.000000.'];
+// Antenna LED palette key (row 3 cols 7-8) — gold for the win mood.
+const ANTENNA = '5';
+
+function composeWin() {
+	const rows = GLITCH_BASE.trim().split('\n').map((r) => r.split(''));
+	rows[3][7] = ANTENNA;
+	rows[3][8] = ANTENNA;
+	for (let dy = 0; dy < 6; dy++) {
+		for (let dx = 0; dx < 8; dx++) {
+			const c = EYES_STAR[dy][dx];
+			if (c !== '.') {
+				rows[6 + dy][4 + dx] = c;
+			}
+		}
+	}
+	for (let dy = 0; dy < 2; dy++) {
+		for (let dx = 0; dx < 8; dx++) {
+			const c = MOUTH_GRIN[dy][dx];
+			if (c !== '.') {
+				rows[13 + dy][4 + dx] = c;
+			}
+		}
+	}
+	return rows.map((r) => r.join(''));
+}
+
+const SPRITE = composeWin();
+const SPRITE_H = SPRITE.length; // 18
+const SPRITE_W = SPRITE[0].length; // 16
 
 const SIZE = 128;
-const SCALE = 7;
-const SPRITE = 16;
+const SCALE = 6; // 18*6=108, 16*6=96 — leaves 10px / 16px margins for the pink border to breathe
 const BG = [30, 30, 30];
-const offset = Math.floor((SIZE - SPRITE * SCALE) / 2);
+const offsetX = Math.floor((SIZE - SPRITE_W * SCALE) / 2);
+const offsetY = Math.floor((SIZE - SPRITE_H * SCALE) / 2);
 
 const pixels = Buffer.alloc(SIZE * SIZE * 4);
 for (let i = 0; i < pixels.length; i += 4) {
@@ -60,17 +97,17 @@ for (let i = 0; i < pixels.length; i += 4) {
 	pixels[i + 3] = 255;
 }
 
-for (let py = 0; py < SPRITE; py++) {
-	for (let px = 0; px < SPRITE; px++) {
-		const ch = WIN[py][px];
+for (let py = 0; py < SPRITE_H; py++) {
+	for (let px = 0; px < SPRITE_W; px++) {
+		const ch = SPRITE[py][px];
 		const color = PALETTE[ch];
 		if (!color) {
 			continue;
 		}
 		for (let dy = 0; dy < SCALE; dy++) {
 			for (let dx = 0; dx < SCALE; dx++) {
-				const x = offset + px * SCALE + dx;
-				const y = offset + py * SCALE + dy;
+				const x = offsetX + px * SCALE + dx;
+				const y = offsetY + py * SCALE + dy;
 				if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) {
 					continue;
 				}
@@ -84,7 +121,7 @@ for (let py = 0; py < SPRITE; py++) {
 	}
 }
 
-// Add a subtle 1-pixel border in pink to give the icon a frame
+// Subtle 1-pixel pink border for the marketplace frame.
 const borderColor = [255, 119, 184];
 for (let i = 0; i < SIZE; i++) {
 	for (const [x, y] of [
@@ -133,8 +170,8 @@ function chunk(type, data) {
 const ihdr = Buffer.alloc(13);
 ihdr.writeUInt32BE(SIZE, 0);
 ihdr.writeUInt32BE(SIZE, 4);
-ihdr[8] = 8; // bit depth
-ihdr[9] = 6; // color type: RGBA
+ihdr[8] = 8;
+ihdr[9] = 6; // RGBA
 ihdr[10] = 0;
 ihdr[11] = 0;
 ihdr[12] = 0;

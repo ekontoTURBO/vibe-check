@@ -281,9 +281,66 @@ export class ContextGatherer {
 		}
 		const root = folders[0].uri;
 		const tree = await this.buildTree(root, 0, 3);
+		const parts: string[] = [`=== Project tree (3 levels) ===\n${tree}`];
+		let total = tree.length;
+
+		// Add key entry-point files so the model has actual substance to quiz on,
+		// not just folder names. Tree alone is too thin and triggers refusals.
+		const entryPoints = [
+			'package.json',
+			'tsconfig.json',
+			'pyproject.toml',
+			'Cargo.toml',
+			'go.mod',
+			'README.md',
+			'src/index.ts',
+			'src/main.ts',
+			'src/extension.ts',
+			'src/app.ts',
+			'src/index.js',
+			'src/main.js',
+			'src/main.py',
+			'src/lib.rs',
+			'main.go',
+		];
+		for (const rel of entryPoints) {
+			if (total >= MAX_TOTAL_BYTES) {
+				break;
+			}
+			const file = await this.readFile(vscode.Uri.joinPath(root, rel));
+			if (!file) {
+				continue;
+			}
+			// For package.json, trim to just the architecture-relevant fields.
+			let content = file;
+			if (rel === 'package.json') {
+				try {
+					const parsed = JSON.parse(file);
+					content = JSON.stringify(
+						{
+							name: parsed.name,
+							main: parsed.main,
+							module: parsed.module,
+							exports: parsed.exports,
+							workspaces: parsed.workspaces,
+							scripts: parsed.scripts,
+							dependencies: parsed.dependencies,
+						},
+						null,
+						2
+					);
+				} catch {
+					content = file;
+				}
+			}
+			const trimmed = this.truncate(content, MAX_FILE_BYTES);
+			parts.push(`=== ${rel} ===\n${trimmed}`);
+			total += trimmed.length;
+		}
+
 		return {
-			label: 'Project structure',
-			content: tree,
+			label: 'Project architecture',
+			content: parts.join('\n\n'),
 		};
 	}
 

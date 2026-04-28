@@ -1,6 +1,7 @@
 import { LLMService } from './LLMService';
 import {
 	CodeOrderQuestion,
+	FillBlankQuestion,
 	LineRange,
 	Module,
 	ModuleLesson,
@@ -28,9 +29,34 @@ const TOPIC_GUIDE: Record<Topic, string> = {
 	security: 'Input validation, injection vectors, secret handling, auth flows, dependency risks.',
 };
 
+/** Hard rules every lesson prompt must enforce — prevents the "what color is used" trivia drift. */
+const QUALITY_RULES = `QUALITY RULES (HARD CONSTRAINTS — violating any of these makes a question invalid):
+
+DO NOT ASK ABOUT:
+- Variable names, function names, parameter names ("what is the variable called")
+- String literals, log messages, comment text, color values, error message wording
+- Casing, indentation, whitespace, line counts, character counts
+- Magic numbers as values ("what number is on line 5") — only ask why a number is what it is
+- The exact contents of imports, file paths, or filenames
+- Trivia about syntax that any IDE highlights ("what keyword starts a function")
+
+DO ASK ABOUT:
+- BEHAVIOR: what a block does, what it returns, what side effects it produces
+- CONTROL FLOW: which branch runs when X, what order operations execute, what triggers what
+- DATA: how data shape transforms through the code, what gets stored vs returned
+- EDGE CASES: what happens with empty input, null, errors, concurrent calls, large inputs
+- PURPOSE: why a block exists, what problem it solves, what would break without it
+- DEPENDENCIES: what this code needs to work, what depends on it, coupling concerns
+
+QUESTIONS MUST REFER TO MEANINGFUL CODE BLOCKS, NOT INDIVIDUAL TOKENS.
+For multiple-choice, the prompt should reference a section ("the function that does X", "the block on lines 8-15", "the validation step") not a single line or identifier.
+
+If the provided context is too small or trivial to support a non-trivial question on this lesson's objective, return FEWER questions rather than padding with trivia. Quality > quantity.`;
+
 interface ParsedSkeletonLesson {
 	title: string;
 	objective: string;
+	topic?: Topic;
 }
 
 interface ParsedSkeleton {
@@ -55,7 +81,43 @@ interface ParsedCO {
 	lineRange?: LineRange;
 }
 
-type ParsedQuestion = ParsedMC | ParsedCO;
+interface ParsedFB {
+	type: 'fill-blank';
+	prompt: string;
+	codeBefore: string;
+	codeAfter: string;
+	options: string[];
+	correctIndex: number;
+	explanation: string;
+	lineRange?: LineRange;
+}
+
+type ParsedQuestion = ParsedMC | ParsedCO | ParsedFB;
+
+export interface ContextSize {
+	lessons: number;
+	questionsPerLesson: number;
+}
+
+/** Decide module size from context length. Tiny dumps shouldn't be padded with trivia. */
+export function sizeForContext(contextChars: number): ContextSize {
+	if (contextChars < 800) {
+		return { lessons: 2, questionsPerLesson: 3 };
+	}
+	if (contextChars < 2500) {
+		return { lessons: 3, questionsPerLesson: 4 };
+	}
+	if (contextChars < 6000) {
+		return { lessons: 4, questionsPerLesson: 5 };
+	}
+	return { lessons: 5, questionsPerLesson: 5 };
+}
+
+/** Pick lesson topics for an auto-fired (mixed) module, taking N from the priority order. */
+export function pickMixedTopics(lessonCount: number): Topic[] {
+	const priority: Topic[] = ['code', 'security', 'architecture', 'tools', 'code'];
+	return priority.slice(0, Math.max(1, lessonCount));
+}
 
 export interface ModuleSkeletonOptions {
 	topic: Topic;
@@ -64,16 +126,26 @@ export interface ModuleSkeletonOptions {
 	contextLabel: string;
 	sourceFile?: string;
 	baseLine?: number;
+	/** When provided, generates a mixed-topic skeleton instead of a single-topic one. */
+	topicMix?: Topic[];
 }
 
 export class TeacherProvider {
 	constructor(private llm: LLMService) {}
 
 	async generateModuleSkeleton(opts: ModuleSkeletonOptions): Promise<Module> {
-		const system = this.buildSkeletonSystemPrompt(opts.topic, opts.track);
+		const size = sizeForContext(opts.context.length);
+		const isMixed = !!opts.topicMix && opts.topicMix.length > 1;
+		const lessonTopics = isMixed
+			? (opts.topicMix as Topic[]).slice(0, size.lessons)
+			: Array(size.lessons).fill(opts.topic);
+
+		const system = isMixed
+			? this.buildMixedSkeletonSystemPrompt(lessonTopics, opts.track, size.lessons)
+			: this.buildSkeletonSystemPrompt(opts.topic, opts.track, size.lessons);
 		const user = this.buildContextPrompt(opts.contextLabel, opts.context);
-		const raw = await this.llm.complete({ system, user, maxTokens: 700 });
-		const parsed = this.parseSkeleton(raw);
+		const raw = await this.llm.complete({ system, user, maxTokens: 800 });
+		const parsed = this.parseSkeleton(raw, size.lessons);
 
 		const moduleId = `mod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 		const lessons: ModuleLesson[] = parsed.lessons.map((l, i) => ({
@@ -82,6 +154,7 @@ export class TeacherProvider {
 			title: l.title,
 			objective: l.objective,
 			state: i === 0 ? 'available' : 'locked',
+			topic: isMixed ? lessonTopics[i] ?? opts.topic : undefined,
 		}));
 
 		return {
@@ -95,6 +168,8 @@ export class TeacherProvider {
 			sourceFile: opts.sourceFile,
 			baseLine: opts.baseLine ?? 0,
 			createdAt: Date.now(),
+			topicMix: isMixed ? lessonTopics : undefined,
+			questionsPerLesson: size.questionsPerLesson,
 		};
 	}
 
@@ -120,92 +195,166 @@ Now write the personalized explanation of WHY their answer is wrong.`;
 	}
 
 	async generateLessonQuestions(module: Module, lesson: ModuleLesson): Promise<Question[]> {
-		const system = this.buildLessonSystemPrompt(module, lesson);
+		const questionsPerLesson = module.questionsPerLesson ?? 5;
+		const lessonTopic = lesson.topic ?? module.topic;
+		const system = this.buildLessonSystemPrompt(module, lesson, lessonTopic, questionsPerLesson);
 		const user = this.buildContextPrompt(module.contextLabel, module.context);
-		const raw = await this.llm.complete({ system, user, maxTokens: 1500 });
+		// Scale token budget with question count (was a flat 1500 regardless of size).
+		const maxTokens = Math.min(2000, 350 + questionsPerLesson * 280);
+		const raw = await this.llm.complete({ system, user, maxTokens });
 		const parsed = this.parseQuestions(raw);
 
 		return parsed.map((p, i) =>
-			this.toQuestion(p, module, lesson, module.baseLine, i)
+			this.toQuestion(p, module, lesson, lessonTopic, module.baseLine, i)
 		);
 	}
 
-	private buildSkeletonSystemPrompt(topic: Topic, track: Track): string {
-		return `You are designing a Duolingo-style MODULE for the "Vibe Check" extension. A module contains EXACTLY 5 sequential lessons that progress from surface-level to deep understanding. The learner will unlock lessons one at a time.
+	private buildSkeletonSystemPrompt(topic: Topic, track: Track, lessonCount: number): string {
+		return `You are designing a Duolingo-style MODULE for the "Vibe Check" extension. A module contains EXACTLY ${lessonCount} sequential lessons that progress from surface-level to deep understanding. The learner unlocks lessons one at a time.
 
 MODULE SPEC
 - Topic: ${topic} — ${TOPIC_GUIDE[topic]}
 - Track (difficulty): ${track} — ${TRACK_GUIDE[track]}
+- Lesson count: ${lessonCount} (chosen because the context is ${lessonCount <= 2 ? 'small' : lessonCount <= 3 ? 'modest' : lessonCount <= 4 ? 'substantial' : 'large'} — don't pad).
 
 RETURN ONLY JSON (no fences, no prose):
 {
   "title": "Module title (3-6 words capturing the core theme)",
   "lessons": [
-    { "title": "Lesson 1 title (2-4 words)", "objective": "1 sentence describing what the learner will master in this lesson" },
-    { "title": "Lesson 2 title", "objective": "..." },
-    { "title": "Lesson 3 title", "objective": "..." },
-    { "title": "Lesson 4 title", "objective": "..." },
-    { "title": "Lesson 5 title", "objective": "..." }
+    { "title": "Lesson 1 title (2-4 words)", "objective": "1 sentence describing what the learner will master in this lesson" }
+    ${lessonCount > 1 ? ',\n    { "title": "Lesson 2 title", "objective": "..." }' : ''}${lessonCount > 2 ? ',\n    { "title": "Lesson 3 title", "objective": "..." }' : ''}${lessonCount > 3 ? ',\n    { "title": "Lesson 4 title", "objective": "..." }' : ''}${lessonCount > 4 ? ',\n    { "title": "Lesson 5 title", "objective": "..." }' : ''}
   ]
 }
 
 RULES
-- Lesson 1 = simplest: name things, identify, recognize. Lesson 5 = synthesis or hardest case.
+- Lesson 1 = simplest: identify, recognize, name behavior. Last lesson = synthesis or hardest case.
 - Each lesson covers a DISTINCT aspect of the context. No overlap.
-- Match difficulty to the track. Beginner module = no expert-level lessons even at lesson 5.
-- Lesson titles should be specific (e.g. "Async/await flow" not "Lesson 1").`;
+- Match difficulty to the track. Beginner module = no expert-level lessons even at the last lesson.
+- Lesson titles must be specific (e.g. "Async/await flow" not "Lesson 1").
+- Lesson objectives focus on BEHAVIOR / CONTROL FLOW / EDGE CASES — not on naming, comments, or syntax trivia.`;
 	}
 
-	private buildLessonSystemPrompt(module: Module, lesson: ModuleLesson): string {
-		return `You are generating the 5 questions for ONE specific lesson in a Duolingo-style module. Use closed questions only (no free text).
+	private buildMixedSkeletonSystemPrompt(
+		topics: Topic[],
+		track: Track,
+		lessonCount: number
+	): string {
+		const topicLines = topics
+			.map((t, i) => `  Lesson ${i + 1} angle: ${t} — ${TOPIC_GUIDE[t]}`)
+			.join('\n');
+		return `You are designing a Duolingo-style MIXED MODULE for the "Vibe Check" extension. The same chunk of code is examined from MULTIPLE angles, one angle per lesson. ${lessonCount} lessons total, each unlocked sequentially.
+
+MODULE SPEC
+- Mixed module: each lesson tackles a DIFFERENT angle on the SAME code.
+- Track (difficulty): ${track} — ${TRACK_GUIDE[track]}
+
+LESSON ANGLES (in order — DO NOT CHANGE THE ORDER):
+${topicLines}
+
+RETURN ONLY JSON (no fences, no prose):
+{
+  "title": "Module title (3-6 words; reflect the code's purpose, not the angles)",
+  "lessons": [
+    { "title": "Lesson title (2-4 words, reflects this lesson's angle)", "objective": "1 sentence: what learner masters about THIS angle of the code" }
+    // ${lessonCount} entries total, in the angle order above
+  ]
+}
+
+RULES
+- Each lesson examines the SAME code through its assigned angle. Don't drift to a different topic.
+- Objective must reference the angle (e.g. for security: "Identify the unchecked input path"; for architecture: "Trace which subsystem owns this logic").
+- If a given angle has nothing meaningful to ask about this code, write an objective that says so honestly — the question generator will produce fewer questions instead of inventing trivia.
+- Match difficulty to the track.`;
+	}
+
+	private buildLessonSystemPrompt(
+		module: Module,
+		lesson: ModuleLesson,
+		lessonTopic: Topic,
+		questionsPerLesson: number
+	): string {
+		return `You are generating up to ${questionsPerLesson} questions for ONE specific lesson in a Duolingo-style module. Use closed questions only (no free text).
 
 MODULE: "${module.title}"
-TOPIC: ${module.topic} — ${TOPIC_GUIDE[module.topic]}
+THIS LESSON's TOPIC ANGLE: ${lessonTopic} — ${TOPIC_GUIDE[lessonTopic]}
 TRACK: ${module.track} — ${TRACK_GUIDE[module.track]}
 
-THIS LESSON (lesson ${lesson.index + 1} of 5)
+THIS LESSON (lesson ${lesson.index + 1})
 - Title: "${lesson.title}"
 - Objective: ${lesson.objective}
 
-Generate EXACTLY 5 closed questions matching this lesson's objective and the track's difficulty.
+Generate UP TO ${questionsPerLesson} closed questions matching this lesson's objective and the track's difficulty. If the context truly does not support that many high-quality questions, return fewer (minimum 2). Better to have 3 sharp questions than 5 with trivia.
 
-QUESTION TYPES (mix freely):
+NEVER REFUSE. Never return a sentence saying the context is too small. Even minimal context (a single function, a tree of folder names, a config file) supports at least 2 questions about what IS visible — about file roles, about which directory owns which concern, about what a config flag does. If you genuinely cannot find 2 things to ask, ask about the most prominent visible elements (file purpose, dependency role, directory responsibility). The response MUST be a JSON object with a "questions" array — no prose, no apology, no markdown fences.
+
+QUESTION TYPES (mix freely — variety is good, but only when it fits):
 
 1. multiple-choice — exactly 4 distinct options, exactly one correct.
-   Distractors must be plausible. No "all of the above"-style filler.
+   The prompt MUST be about a meaningful behavior, control flow, or design choice — NOT about a single token, name, or value.
+   The lineRange is REQUIRED for multiple-choice and must span at least 3 lines (or the entire snippet if shorter). It marks the BLOCK the question is about.
+   Distractors must be plausible misreadings of the same code. Never use throwaway options like "none of the above".
    {
      "type": "multiple-choice",
-     "prompt": "string",
+     "prompt": "What does the block on lines X-Y do?" (or similar — refer to the section as a whole),
      "options": ["a","b","c","d"],
      "correctIndex": 0,
-     "explanation": "1-3 sentences justifying the correct answer",
-     "lineRange": { "start": number, "end": number }   // OPTIONAL, 1-indexed within source context
+     "explanation": "1-3 sentences justifying the correct answer by referring to specific behavior",
+     "lineRange": { "start": number, "end": number }   // 1-indexed within source context, REQUIRED for MC
    }
 
 2. code-order — learner reorders shuffled lines into the correct sequence.
-   Use for 3-7 line snippets where order is meaningful (control flow, async, lifecycle).
-   Lines MUST be unique strings.
+   Use ONLY when order is meaningful (control flow, async chain, lifecycle, dependency setup). Do NOT use for arbitrary line lists.
+   3-7 lines total. Lines MUST be unique strings.
    {
      "type": "code-order",
      "prompt": "Reorder these lines to ...",
      "correctSequence": ["line1","line2","line3"],
-     "explanation": "..."
+     "explanation": "1-3 sentences",
+     "lineRange": { "start": number, "end": number }   // OPTIONAL
+   }
+
+3. fill-blank — learner picks the missing token/expression that completes a code snippet.
+   Show 2-5 lines of code BEFORE the blank and 0-3 lines AFTER. The blank should be a meaningful expression, condition, call, or argument — NOT a variable name or string literal.
+   Options must be 4 plausible candidates that all parse correctly in context; only one preserves the intended behavior.
+   {
+     "type": "fill-blank",
+     "prompt": "What expression completes the gap so this validates input correctly?" (or similar),
+     "codeBefore": "if (typeof user === 'object' && user !== null) {\\n  if (",
+     "codeAfter": ") {\\n    return user.id;\\n  }\\n}",
+     "options": ["user.id","user.id != null","'id' in user","Object.hasOwn(user, 'id')"],
+     "correctIndex": 1,
+     "explanation": "...",
+     "lineRange": { "start": number, "end": number }   // OPTIONAL
    }
 
 OUTPUT — raw JSON, no fences:
-{ "questions": [ ... exactly 5 items ... ] }
+{ "questions": [ ... up to ${questionsPerLesson} items ... ] }
+
+${QUALITY_RULES}
 
 RULES
-- All questions must be answerable from the provided context.
-- Stay focused on this lesson's objective. Do not drift into other lessons' material.
-- Match difficulty to the track precisely.`;
+- All questions answerable from the provided context. No outside knowledge required.
+- Stay laser-focused on this lesson's objective and angle. Do not drift to a different aspect of the code.
+- Match difficulty to the track precisely.
+- For multiple-choice, ALWAYS provide a lineRange spanning ≥3 lines (or whole context if shorter).`;
 	}
 
 	private buildContextPrompt(label: string, context: string): string {
-		return `CONTEXT (${label}):\n\n"""\n${context}\n"""\n\nGenerate now.`;
+		return `CONTEXT (${label}):
+
+"""
+${context}
+"""
+
+CONTEXT GUIDANCE:
+- Skip imports, license headers, and pure constants when picking what to quiz on. Find the behavior-rich section.
+- If the context contains a well-defined function/class/block, prefer questions about THAT block as a whole.
+- If the context is mostly boilerplate or trivial, return fewer questions — do not invent trivia to pad.
+
+Generate now.`;
 	}
 
-	private parseSkeleton(raw: string): ParsedSkeleton {
+	private parseSkeleton(raw: string, expectedLessons: number): ParsedSkeleton {
 		const obj = parseJsonObject(raw);
 		const r = obj as Record<string, unknown>;
 		const title = typeof r.title === 'string' ? r.title : '';
@@ -220,17 +369,17 @@ RULES
 				lessons.push({ title: li.title, objective: li.objective });
 			}
 		}
-		if (lessons.length < 3) {
-			throw new Error(`Module skeleton had ${lessons.length} valid lessons, need at least 3`);
+		const minLessons = Math.max(2, Math.min(expectedLessons, 2));
+		if (lessons.length < minLessons) {
+			throw new Error(`Module skeleton had ${lessons.length} valid lessons, need at least ${minLessons}`);
 		}
-		// Pad to 5 if model returned fewer
-		while (lessons.length < 5) {
+		while (lessons.length < expectedLessons) {
 			lessons.push({
 				title: `Lesson ${lessons.length + 1}`,
 				objective: 'Further practice on this topic',
 			});
 		}
-		return { title, lessons: lessons.slice(0, 5) };
+		return { title, lessons: lessons.slice(0, expectedLessons) };
 	}
 
 	private parseQuestions(raw: string): ParsedQuestion[] {
@@ -302,6 +451,41 @@ RULES
 			};
 		}
 
+		if (r.type === 'fill-blank') {
+			if (typeof r.codeBefore !== 'string' || typeof r.codeAfter !== 'string') {
+				return null;
+			}
+			if (!Array.isArray(r.options) || r.options.length < 2) {
+				return null;
+			}
+			const options = r.options.filter((o): o is string => typeof o === 'string');
+			if (options.length !== r.options.length) {
+				return null;
+			}
+			if (new Set(options).size !== options.length) {
+				return null;
+			}
+			const ci = r.correctIndex;
+			if (typeof ci !== 'number' || ci < 0 || ci >= options.length) {
+				return null;
+			}
+			// Reject empty or trivial gaps.
+			const correct = options[Math.floor(ci)];
+			if (!correct.trim()) {
+				return null;
+			}
+			return {
+				type: 'fill-blank',
+				prompt: r.prompt,
+				codeBefore: r.codeBefore,
+				codeAfter: r.codeAfter,
+				options,
+				correctIndex: Math.floor(ci),
+				explanation: r.explanation,
+				lineRange,
+			};
+		}
+
 		return null;
 	}
 
@@ -320,10 +504,15 @@ RULES
 		p: ParsedQuestion,
 		module: Module,
 		lesson: ModuleLesson,
+		lessonTopic: Topic,
 		baseLine: number,
 		index: number
 	): Question {
 		const id = `q-${lesson.id}-${index}-${Math.random().toString(36).slice(2, 6)}`;
+
+		// Slice the inline code snippet from module.context BEFORE adjusting line range to editor coords.
+		const codeSnippet = sliceContextLines(module.context, p.lineRange);
+
 		const lineRange = p.lineRange
 			? {
 					start: baseLine + Math.max(0, p.lineRange.start - 1),
@@ -336,30 +525,71 @@ RULES
 			prompt: p.prompt,
 			explanation: p.explanation,
 			track: module.track,
-			topic: module.topic,
+			topic: lessonTopic,
 			moduleId: module.id,
 			lessonId: lesson.id,
 			sourceFile: module.sourceFile,
 			lineRange,
+			codeSnippet,
 			createdAt: Date.now(),
 		};
 
 		if (p.type === 'multiple-choice') {
+			// Shuffle to defeat the model's bias toward correctIndex: 0.
+			const shuffled = shuffleOptions(p.options, p.correctIndex, id);
 			const q: MultipleChoiceQuestion = {
 				...base,
 				type: 'multiple-choice',
-				options: p.options,
-				correctIndex: p.correctIndex,
+				options: shuffled.options,
+				correctIndex: shuffled.correctIndex,
 			};
 			return q;
 		}
-		const q: CodeOrderQuestion = {
+		if (p.type === 'code-order') {
+			const q: CodeOrderQuestion = {
+				...base,
+				type: 'code-order',
+				correctSequence: p.correctSequence,
+			};
+			return q;
+		}
+		const shuffled = shuffleOptions(p.options, p.correctIndex, id);
+		const q: FillBlankQuestion = {
 			...base,
-			type: 'code-order',
-			correctSequence: p.correctSequence,
+			type: 'fill-blank',
+			codeBefore: p.codeBefore,
+			codeAfter: p.codeAfter,
+			options: shuffled.options,
+			correctIndex: shuffled.correctIndex,
 		};
 		return q;
 	}
+}
+
+/** Seeded Fisher-Yates shuffle of options that tracks where the correct answer landed. */
+function shuffleOptions(
+	options: string[],
+	correctIndex: number,
+	seed: string
+): { options: string[]; correctIndex: number } {
+	if (options.length <= 1) {
+		return { options: [...options], correctIndex };
+	}
+	const correctAnswer = options[correctIndex];
+	const indices = options.map((_, i) => i);
+	let h = 2166136261 >>> 0;
+	for (let i = 0; i < seed.length; i++) {
+		h = ((h ^ seed.charCodeAt(i)) >>> 0) * 16777619;
+		h = h >>> 0;
+	}
+	for (let i = indices.length - 1; i > 0; i--) {
+		h = ((h * 1664525) >>> 0) + 1013904223;
+		h = h >>> 0;
+		const j = h % (i + 1);
+		[indices[i], indices[j]] = [indices[j], indices[i]];
+	}
+	const reordered = indices.map((i) => options[i]);
+	return { options: reordered, correctIndex: reordered.indexOf(correctAnswer) };
 }
 
 function parseJsonObject(raw: string): unknown {
@@ -367,6 +597,12 @@ function parseJsonObject(raw: string): unknown {
 	const start = cleaned.indexOf('{');
 	const end = cleaned.lastIndexOf('}');
 	if (start === -1 || end === -1 || end <= start) {
+		// Detect refusal-style replies and translate them into something the user can act on.
+		if (looksLikeRefusal(cleaned)) {
+			throw new Error(
+				"The model refused to generate questions for this context. This usually means the workspace is too small or generic. Try opening a richer file or selecting a specific code block, then run 'Quiz Me On Selection'."
+			);
+		}
 		throw new Error(`Response was not JSON. Got: ${cleaned.slice(0, 200)}`);
 	}
 	const slice = cleaned.slice(start, end + 1);
@@ -375,6 +611,21 @@ function parseJsonObject(raw: string): unknown {
 	} catch (err) {
 		throw new Error(`JSON parse failed: ${(err as Error).message}`);
 	}
+}
+
+function looksLikeRefusal(text: string): boolean {
+	const lower = text.toLowerCase();
+	const tells = [
+		'sorry',
+		'cannot generate',
+		'too minimal',
+		'too small',
+		'not enough',
+		'insufficient',
+		'please provide',
+		'unable to',
+	];
+	return tells.some((t) => lower.includes(t)) && lower.length < 600;
 }
 
 function stripFences(s: string): string {
@@ -386,4 +637,18 @@ function stripFences(s: string): string {
 
 function capitalize(s: string): string {
 	return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Slice context-relative lines (1-indexed inclusive) from the raw module context. */
+function sliceContextLines(context: string, range?: LineRange): string | undefined {
+	if (!range) {
+		return undefined;
+	}
+	const lines = context.split('\n');
+	const start = Math.max(0, range.start - 1);
+	const end = Math.min(lines.length, range.end);
+	if (end <= start) {
+		return undefined;
+	}
+	return lines.slice(start, end).join('\n');
 }

@@ -428,18 +428,36 @@ export class SidebarView implements vscode.WebviewViewProvider {
 			return;
 		}
 		try {
+			// Wipe prior highlights first — otherwise repeat clicks on SHOW for the SAME doc
+			// don't visually re-paint the new range (the old decoration sticks).
+			this.clearGlow();
 			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-			const editor = await vscode.window.showTextDocument(doc, {
+			const shown = await vscode.window.showTextDocument(doc, {
 				preserveFocus: false,
 				preview: false,
 				viewColumn: vscode.ViewColumn.One,
 			});
+			// Prefer the current activeTextEditor — when the doc was already open, `shown` can be a
+			// stale handle whose setDecorations call is silently no-op'd.
+			const editor =
+				vscode.window.activeTextEditor &&
+				vscode.window.activeTextEditor.document.uri.toString() === doc.uri.toString()
+					? vscode.window.activeTextEditor
+					: shown;
 			const last = doc.lineCount - 1;
 			const start = Math.max(0, Math.min(startLine, last));
 			const end = Math.max(start, Math.min(endLine, last));
 			const range = new vscode.Range(start, 0, end, Number.MAX_SAFE_INTEGER);
-			editor.setDecorations(this.decoration, [range]);
 			editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+			// Apply the decoration on the next tick — gives the editor time to settle after focus/scroll
+			// and ensures the paint actually happens on a fresh frame.
+			setTimeout(() => {
+				try {
+					editor.setDecorations(this.decoration, [range]);
+				} catch (err) {
+					console.error('[VibeCheck] setDecorations (deferred) failed:', err);
+				}
+			}, 0);
 		} catch (err) {
 			console.error('[VibeCheck] revealLines failed:', err);
 		}

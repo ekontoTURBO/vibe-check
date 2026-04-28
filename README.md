@@ -1,6 +1,15 @@
+<div align="center">
+
+<img src="media/glitch-idle.png" alt="Glitch — the Vibe Check mascot" width="160" />
+
 # Vibe Check
 
-> **Anti-vibe-coding mentor.** When AI writes code for you, Vibe Check turns it into a Duolingo-style quiz so you actually understand it.
+**Anti-vibe-coding mentor.** When AI writes code for you, Vibe Check turns it into a Duolingo-style quiz so you actually understand it.
+
+[![Open VSX](https://img.shields.io/open-vsx/v/cognitra/vibe-check?label=Open%20VSX&color=ff77b8)](https://open-vsx.org/extension/cognitra/vibe-check)
+[![License](https://img.shields.io/badge/license-MIT-4ec9ff)](LICENSE)
+
+</div>
 
 Inspired by Duolingo's mastery loops and Brilliant's interactive learning, Vibe Check intercepts large AI-generated code insertions and turns them into structured, gated learning modules — complete with spaced repetition, three difficulty tracks, and an XP/streak system.
 
@@ -18,6 +27,39 @@ You ship code an agent wrote. A week later, it breaks. You can't fix it because 
 - Questions you answered live in a spaced-repetition queue. Tomorrow Vibe Check asks you the trickiest ones again.
 
 No fluff, no free-text gotchas, no LLM grading you on vibes. Closed questions, deterministic grading, pixel-art mascot judging your every wrong answer.
+
+---
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="media/screenshots/01-home.png" alt="Sidebar home screen with XP, streak, and module list" />
+<p><em>Home — pick a track, see your XP/streak, jump back into modules.</em></p>
+</td>
+<td width="50%" valign="top">
+<img src="media/screenshots/02-module-path.png" alt="Duolingo-style lesson path with locked gates" />
+<p><em>Module path — five sequential lessons, each locked behind the last.</em></p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="media/screenshots/03-question.png" alt="Multiple-choice question with inline code preview" />
+<p><em>A question in flight — the exact code block is shown above the options, click <strong>📍 SHOW</strong> to jump to it in the editor.</em></p>
+</td>
+<td width="50%" valign="top">
+<img src="media/screenshots/04-feedback-wrong.png" alt="Wrong-answer feedback with ? WHY and TRY AGAIN buttons" />
+<p><em>Wrong answer? Get the canonical explanation free, or click <strong>? WHY</strong> for a personalized one that points at <em>your</em> mistake.</em></p>
+</td>
+</tr>
+<tr>
+<td colspan="2" align="center" valign="top">
+<img src="media/screenshots/05-lesson-complete.png" alt="Lesson complete screen with score and XP earned" width="320" />
+<p><em>Lesson complete — score, XP earned, streak bumped. Next lesson unlocks.</em></p>
+</td>
+</tr>
+</table>
 
 ---
 
@@ -79,8 +121,9 @@ Each track has its own modules, streak, XP, and review queue. Switch freely.
 
 ### Question types
 
-- **Multiple choice** — one prompt, four plausible options, one correct
-- **Code ordering** — shuffled lines you reorder via up/down arrows
+- **Multiple choice** — one prompt, four plausible options, one correct. Inline code preview shows the exact block being asked about
+- **Fill in the blank** — code shown with a highlighted gap, pick from four candidates what fills it correctly
+- **Code ordering** — shuffled lines you reorder via drag-and-drop, with a snap-to-place drop indicator
 
 ### Smart editor integration
 
