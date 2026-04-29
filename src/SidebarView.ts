@@ -79,6 +79,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
 	private trackChangeHandler: TrackChangeHandler | null = null;
 	private sessionFinishHandler: SessionFinishHandler | null = null;
 	private wrongFeedbackHandler: WrongFeedbackHandler | null = null;
+	private cancelGeneration: (() => void) | null = null;
 
 	constructor(
 		private readonly extensionUri: vscode.Uri,
@@ -119,6 +120,9 @@ export class SidebarView implements vscode.WebviewViewProvider {
 	}
 	setWrongFeedbackHandler(h: WrongFeedbackHandler): void {
 		this.wrongFeedbackHandler = h;
+	}
+	setCancelGenerationHandler(h: (() => void) | null): void {
+		this.cancelGeneration = h;
 	}
 
 	startSession(session: QuizSession): void {
@@ -243,6 +247,32 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				this.telemetry?.track('sidebar.button_clicked', { button: 'closeModule', screen: this.screen.kind });
 				this.screen = { kind: 'home' };
 				await this.pushState();
+				return;
+			case 'deleteModule': {
+				const result = this.fsrs.deleteModule(msg.moduleId);
+				this.telemetry?.track('module.deleted', {
+					questionsRemoved: result.questionsRemoved,
+					deleted: result.deleted,
+				});
+				// If we were viewing the deleted module, bounce back to home.
+				if (this.screen.kind === 'path' && this.screen.moduleId === msg.moduleId) {
+					this.screen = { kind: 'home' };
+				}
+				if (this.activeLesson?.module.id === msg.moduleId) {
+					this.activeLesson = null;
+					this.clearGlow();
+				}
+				await this.pushState();
+				return;
+			}
+			case 'cancelGeneration':
+				this.cancelGeneration?.();
+				return;
+			case 'rateQuestion':
+				this.telemetry?.track('question.rated', {
+					rating: msg.rating,
+					type: this.currentQuestionType() ?? 'unknown',
+				});
 				return;
 			case 'openPicker':
 				this.telemetry?.track('sidebar.picker_opened', {});
@@ -512,7 +542,37 @@ export class SidebarView implements vscode.WebviewViewProvider {
 			}
 		}
 
-		this.notifyError(`Couldn't find "${truncate(trimmed, 40)}" in any open file.`);
+		// Workspace-wide fallback — important for topics like Architecture where the
+		// question may reference content (e.g. an npm script) that lives in a closed file.
+		if (await this.tryRevealInWorkspace(trimmed, seen)) {
+			return;
+		}
+
+		this.notifyError(`Couldn't find "${truncate(trimmed, 40)}" anywhere in the workspace.`);
+	}
+
+	/** Scan up to 200 workspace files (skipping common build/dep dirs) for the snippet. */
+	private async tryRevealInWorkspace(snippet: string, alreadyTried: Set<string>): Promise<boolean> {
+		try {
+			const files = await vscode.workspace.findFiles(
+				'**/*',
+				'{**/node_modules/**,**/dist/**,**/out/**,**/build/**,**/.git/**,**/.next/**,**/.turbo/**,**/target/**,**/__pycache__/**,**/*.lock,**/*.png,**/*.jpg,**/*.jpeg,**/*.gif,**/*.webp,**/*.ico,**/*.woff,**/*.woff2,**/*.ttf,**/*.pdf,**/*.zip}',
+				200
+			);
+			// Prioritise small + likely-config files first (package.json, README, etc).
+			const ranked = files.slice().sort((a, b) => weight(a.fsPath) - weight(b.fsPath));
+			for (const uri of ranked) {
+				if (alreadyTried.has(uri.fsPath)) {
+					continue;
+				}
+				if (await this.tryRevealSnippet(uri.fsPath, snippet)) {
+					return true;
+				}
+			}
+		} catch (err) {
+			console.error('[VibeCheck] workspace snippet scan failed:', err);
+		}
+		return false;
 	}
 
 	private async tryRevealSnippet(file: string, snippet: string): Promise<boolean> {
@@ -671,9 +731,9 @@ export class SidebarView implements vscode.WebviewViewProvider {
 	private async pushState(): Promise<void> {
 		const progress = this.fsrs.getProgress();
 		const capabilities = await detectCapabilities();
-		const modules = this.fsrs.listModules(progress.activeTrack);
-		const dueCount = this.fsrs.dueCards(progress.activeTrack).length;
-		const trackProgress = progress.tracks[progress.activeTrack];
+		const modules = this.fsrs.listModules();
+		const dueCount = this.fsrs.dueCards().length;
+		const userProgress = progress.progress;
 
 		const screen = this.computeScreen();
 		const activeModule = this.computeActiveModule(modules);
@@ -683,13 +743,14 @@ export class SidebarView implements vscode.WebviewViewProvider {
 			screen,
 			track: progress.activeTrack,
 			progress: {
-				xp: trackProgress.xp,
-				streak: trackProgress.streak,
-				dailyXp: trackProgress.dailyXp,
+				xp: userProgress.xp,
+				streak: userProgress.streak,
+				dailyXp: userProgress.dailyXp,
 				dailyGoal: this.fsrs.getDailyGoal(),
 				rank: null,
-				totalAnswered: trackProgress.totalAnswered,
-				totalCorrect: trackProgress.totalCorrect,
+				totalAnswered: userProgress.totalAnswered,
+				totalCorrect: userProgress.totalCorrect,
+				freezesAvailable: userProgress.freezesAvailable ?? 0,
 			},
 			modules,
 			activeModule,
@@ -823,6 +884,25 @@ function truncate(s: string, max: number): string {
 	return s.slice(0, max - 1) + '…';
 }
 
+/** Lower weight = higher priority in workspace snippet scan. */
+function weight(fsPath: string): number {
+	const lower = fsPath.toLowerCase();
+	const name = lower.split(/[\\/]/).pop() ?? '';
+	if (name === 'package.json' || name === 'readme.md') {
+		return 0;
+	}
+	if (name === 'tsconfig.json' || name === 'cargo.toml' || name === 'pyproject.toml' || name === 'go.mod') {
+		return 1;
+	}
+	if (/\.(json|toml|yaml|yml|md|txt|cfg|ini)$/.test(name)) {
+		return 2;
+	}
+	if (/\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|rb|php|swift)$/.test(name)) {
+		return 3;
+	}
+	return 4;
+}
+
 function swapQuotes(s: string): string {
 	let out = '';
 	for (const ch of s) {
@@ -856,6 +936,7 @@ interface ProgressPayload {
 	rank: string | null;
 	totalAnswered: number;
 	totalCorrect: number;
+	freezesAvailable: number;
 }
 
 interface ActiveModulePayload {
@@ -928,6 +1009,9 @@ type ClientMessage =
 	| { type: 'openPicker' }
 	| { type: 'closePicker' }
 	| { type: 'newModule'; topic: Topic }
+	| { type: 'deleteModule'; moduleId: string }
+	| { type: 'cancelGeneration' }
+	| { type: 'rateQuestion'; questionId: string; rating: 'up' | 'down' }
 	| { type: 'startLesson'; moduleId: string; lessonId: string }
 	| { type: 'startReview' }
 	| { type: 'submitAnswer'; questionId: string; answer: AnswerPayload; correct: boolean }

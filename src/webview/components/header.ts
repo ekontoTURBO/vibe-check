@@ -118,6 +118,32 @@ export function renderHeader(state: ViewState): HTMLElement {
 		pixelIcon('flame', { scale: 2 })
 	);
 
+	const streakRow = h(
+		'div',
+		{ className: 'vc-stat-row' },
+		flameIcon,
+		h(
+			'div',
+			{ className: 'col' },
+			h(
+				'div',
+				{ className: 'vc-streak__row' },
+				h('span', { className: 'vc-stat-row__value', style: { color: 'var(--vc-flame)' } }, String(progress.streak)),
+				progress.freezesAvailable > 0
+					? h(
+							'span',
+							{
+								className: 'vc-freeze-chip',
+								title: `${progress.freezesAvailable} streak freeze${progress.freezesAvailable === 1 ? '' : 's'} — covers a missed day`,
+							},
+							`❄ ${progress.freezesAvailable}`
+					  )
+					: null
+			),
+			h('span', { className: 'vc-stat-row__label' }, 'DAY STREAK')
+		)
+	);
+
 	const stats = h(
 		'div',
 		{ className: 'vc-stats' },
@@ -126,7 +152,7 @@ export function renderHeader(state: ViewState): HTMLElement {
 			'div',
 			{ className: 'vc-stats__col' },
 			statRow(pixelIcon('star', { scale: 2 }), progress.xp, 'XP', 'var(--vc-gold)'),
-			statRow(flameIcon, progress.streak, 'DAY STREAK', 'var(--vc-flame)'),
+			streakRow,
 			progress.rank
 				? statRow(pixelIcon('trophy', { scale: 2 }), progress.rank, 'RANK', 'var(--vc-fg)')
 				: statRow(

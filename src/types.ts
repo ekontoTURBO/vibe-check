@@ -102,6 +102,20 @@ export interface StoredCard {
 	card: Card;
 }
 
+/** Unified user-level progress — shared across all difficulty tracks. */
+export interface UserProgress {
+	xp: number;
+	streak: number;
+	lastReviewDate: string | null;
+	totalAnswered: number;
+	totalCorrect: number;
+	dailyXp: number;
+	dailyXpDate: string | null;
+	/** Streak freezes — cover missed days. Earned 1 per 7-day streak milestone, capped at MAX_FREEZES. */
+	freezesAvailable?: number;
+}
+
+/** Legacy per-track shape kept for migration only. */
 export interface TrackProgress {
 	xp: number;
 	streak: number;
@@ -113,7 +127,7 @@ export interface TrackProgress {
 }
 
 export interface ProgressState {
-	tracks: Record<Track, TrackProgress>;
+	progress: UserProgress;
 	activeTrack: Track;
 }
 

@@ -62,7 +62,15 @@ export type EventName =
 	| 'progress.daily_goal_met'
 	| 'progress.streak_extended'
 	| 'progress.streak_broken'
+	| 'progress.streak_freeze_used'
+	| 'progress.streak_freeze_earned'
 	| 'progress.reset'
+
+	// Module deletion / question rating / cancellation / prefetch (v0.1.1)
+	| 'module.deleted'
+	| 'module.generation_cancelled'
+	| 'question.rated'
+	| 'lesson.prefetch_completed'
 
 	// Pulse (auto-detection of AI insertions)
 	| 'pulse.observed'
@@ -175,7 +183,24 @@ export interface EventPropMap {
 	'progress.daily_goal_met': { track: string; dailyXp: number };
 	'progress.streak_extended': { track: string; streakDays: number };
 	'progress.streak_broken': { track: string; previousStreak: number };
+	'progress.streak_freeze_used': {
+		track: string;
+		freezesConsumed: number;
+		freezesRemaining: number;
+		gapDays: number;
+	};
+	'progress.streak_freeze_earned': {
+		track: string;
+		earned: number;
+		freezesAvailable: number;
+		streakDays: number;
+	};
 	'progress.reset': Record<string, never>;
+
+	'module.deleted': { questionsRemoved: number; deleted: boolean };
+	'module.generation_cancelled': Record<string, never>;
+	'question.rated': { rating: 'up' | 'down'; type: string };
+	'lesson.prefetch_completed': { lessonIndex: number; durationMs: number };
 
 	'pulse.observed': { chars: number; lines: number; autoQuiz: boolean };
 	'pulse.dismissed': Record<string, never>;

@@ -19,7 +19,15 @@ function generatingOverlay(state: ViewState): HTMLElement {
 		'div',
 		{ className: 'vc-generating' },
 		glitch('think', 4),
-		h('div', { className: 'vc-generating__text' }, label)
+		h('div', { className: 'vc-generating__text' }, label),
+		h(
+			'button',
+			{
+				className: 'pbtn pbtn--small pbtn--ghost',
+				on: { click: () => send({ type: 'cancelGeneration' }) },
+			},
+			'CANCEL'
+		)
 	);
 }
 

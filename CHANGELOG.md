@@ -4,6 +4,31 @@ All notable changes to Vibe Check are documented here.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1]
+
+### Added
+- **Difficulty chip on every module card** (BEG / INT / EXP). Now that modules are shared across tracks you can tell at a glance which difficulty each one was generated at
+- **Track chip in the question header** so you always know which difficulty you're answering at
+- **Delete a module** — small ✕ button on each module card with a confirm prompt. Removes the module *and* its associated FSRS review cards. Replaces the previous all-or-nothing `Reset Progress` for cleanup
+- **Empty state for zero modules** — friendly idle-mascot illustration with a prominent **+ NEW MODULE** call-to-action. First-impression for fresh workspaces is now ~30× better
+- **Cancel-generation button** on the GENERATING overlay. Lightweight cancel — discards the in-flight result so you can retry immediately. (Proper HTTP-level abort coming in v0.1.2)
+- **Keyboard shortcuts in lessons** — press `1` / `2` / `3` / `4` to pick A / B / C / D, `Enter` to submit when ready, `Enter` again to advance after feedback. The submit button shows ` ⏎` so users discover it
+- **Thumbs up/down on every question** — pixel-art icons matching the rest of the UI. Telemetry-only. Helps surface bad LLM-generated questions in the dashboard so the prompts can be tuned. Local-only state; once rated, the buttons lock in
+- **Next-lesson prefetching** — while you're on lesson N, the next lesson's questions are generated in the background. By the time you pass and unlock lesson N+1, it opens instantly with no LLM wait. Silent failure — if prefetch fails you just get the normal generation when you reach it
+- **Streak freeze** ❄ — earn 1 freeze per 7-day streak (cap 3). If you miss a day with a freeze in hand, the streak is preserved automatically on your next review. Visible in the header next to the day-streak count when ≥ 1 is available
+
+### Changed
+- **XP, streak, daily progress, modules, and review queue are now SHARED across all three difficulty tracks.** Beginner / Intermediate / Expert is now purely a difficulty preference for newly generated lessons (still affects question difficulty and the XP rate per correct answer — 5 / 10 / 20). Everything else — your lifetime XP, your streak, the modules you see in the sidebar, the questions due for review — is one shared user-level pool.
+- **Auto-migrates from v0.1.0 and earlier**: if you had three separate per-track progress entries, they're combined on first read. Lifetime XP and total-answered values are summed across tracks; streak takes the max of the three; today's daily XP sums the three tracks' contributions if any were earned today.
+- **New pixel-art Glitch mascot** rolled out everywhere — 18×16 grid, antenna LED, single big screen-eye composed from base + eye + mouth + antenna. The marketplace icon and all in-app mascot states use the same composition system
+
+### Fixed
+- **First click on a question was sometimes silently dropped** — required a double-click to actually select an option on the first question of a lesson and on every transition between questions. Root cause: the local-state cleanup subscriber was registered after the render subscriber, so it was nulling out the selection object that the freshly-rendered click handlers had just captured in closures. Fix: cleanup now runs before render, and triggers only on lesson change (not on intra-lesson question advances).
+- **Lessons that had only 1 question** would auto-complete immediately after the first answer (jump straight to summary). Now the parser enforces a minimum of 2 questions per lesson; if the model returns fewer it auto-retries once with a stricter prompt. Lessons saved with the old 1-question shape automatically regenerate when opened
+- **JSON parse failures during lesson generation** — three-strategy fallback in the parser. (1) Balanced-brace scan finds the first complete JSON object, surviving narrative prefixes the model occasionally adds. (2) Tolerant repair strips comments, removes trailing commas, and quotes unquoted property names so common LLM JSON mistakes parse anyway. (3) On total failure, the raw model response is logged to the developer console for debugging
+- **"Couldn't find X in any open file" when clicking inline code references** — now scans the whole workspace (up to 200 files, ignoring `node_modules` / `dist` / lock files / binaries) when the snippet isn't in any open editor. Prioritises `package.json` and `README.md` first, then config files, then source files. Especially helpful for Architecture-topic questions referencing npm scripts in closed `package.json` files
+- **Error banner in the sidebar** now has an explicit ✕ close button on the right; clicking the message body no longer dismisses it (so you can read the full text without accidentally closing it)
+
 ## [0.1.0]
 
 ### Added

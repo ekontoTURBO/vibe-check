@@ -9,6 +9,19 @@ if (!root) {
 	throw new Error('vc-root element missing');
 }
 
+// IMPORTANT: cleanup MUST be subscribed BEFORE render. Subscribers fire in registration order;
+// if render runs first it captures the stale `local` selection in click-handler closures, then
+// cleanup nulls out `local`, which causes the next click to write to an orphaned object that
+// the next render discards — manifesting as a "first click does nothing" bug.
+let lastLessonId = '';
+store.subscribe((state) => {
+	const lessonId = state.activeLesson?.lessonId ?? '';
+	if (lessonId !== lastLessonId) {
+		clearLessonLocalSelection();
+		lastLessonId = lessonId;
+	}
+});
+
 store.subscribe((state) => {
 	render(root, state);
 });
@@ -33,19 +46,6 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 		case 'error':
 			store.setError(msg.message);
 			return;
-	}
-});
-
-// Reset selection state whenever lesson activeId changes (handled by hydrate),
-// also clear when lesson becomes null.
-let lastLessonKey = '';
-store.subscribe((state) => {
-	const key = state.activeLesson
-		? `${state.activeLesson.lessonId}:${state.activeLesson.currentIndex}`
-		: '';
-	if (key !== lastLessonKey) {
-		clearLessonLocalSelection();
-		lastLessonKey = key;
 	}
 });
 

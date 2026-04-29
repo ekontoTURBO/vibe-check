@@ -64,7 +64,7 @@ src/
 ├── EnvironmentDetector.ts          VS Code vs Antigravity detection (cached)
 ├── LLMService.ts                   Thin facade over ProviderRegistry
 ├── TeacherProvider.ts              LLM prompts: skeleton → on-demand questions
-├── FSRSManager.ts                  ts-fsrs scheduler + per-track XP, streaks, locks
+├── FSRSManager.ts                  ts-fsrs scheduler + shared XP/streak/freeze + lesson locks
 ├── PulseObserver.ts                Watches text changes for AI-insertion patterns
 ├── ContextGatherer.ts              Topic-specific source assembly (code/configs/tree)
 ├── SidebarView.ts                  Webview host: HTML shell, CSP, message router
@@ -195,13 +195,19 @@ Knobs in [TeacherProvider.ts](src/TeacherProvider.ts) and [ContextGatherer.ts](s
 - `MAX_FILE_BYTES` — current 5,000. Trim more if costs are spiky.
 - `maxTokens` for lesson — current 1,500. Each `5 questions × ~300 tokens` averages well within.
 
-### Storage keys (globalState, sync via Settings Sync)
+### Storage keys
 
+Per-project (`workspaceState`, never synced):
 - `vibeCheck.modules.v3` — modules with their lessons + lazily-generated questions
 - `vibeCheck.cards.v3` — FSRS card state per question (due dates, stability, rep history)
-- `vibeCheck.progress.v3` — XP, streak, daily ring, totals per track
 
-Wipe with `Vibe Check: Reset Progress`.
+User-level (`globalState`, opt-in Settings Sync):
+- `vibeCheck.progress.v3` — XP, streak, daily ring, freezes, totals (shared across tracks since v0.1.1)
+- `vibeCheck.firstRunActivated.v1`, `vibeCheck.welcomeShown.v2` — one-shot flags
+- `vibeCheck.telemetry.consent.v1` — telemetry decision
+- `vibeCheck.telemetry.queue.v1` — local mirror of pending telemetry events
+
+Wipe both layers with `Vibe Check: Reset Progress`.
 
 ### Pulse Observer
 

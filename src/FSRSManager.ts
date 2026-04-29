@@ -10,7 +10,7 @@ import {
 	StoredCard,
 	Track,
 	TRACKS,
-	TrackProgress,
+	UserProgress,
 } from './types';
 
 const CARDS_KEY = 'vibeCheck.cards.v3';
@@ -18,8 +18,10 @@ const PROGRESS_KEY = 'vibeCheck.progress.v3';
 const MODULES_KEY = 'vibeCheck.modules.v3';
 
 const PASS_THRESHOLD = 0.8; // 4/5 correct to pass a lesson
+const MAX_FREEZES = 3;
+const FREEZE_EARN_EVERY_DAYS = 7;
 
-const EMPTY_TRACK: TrackProgress = {
+const EMPTY_PROGRESS: UserProgress = {
 	xp: 0,
 	streak: 0,
 	lastReviewDate: null,
@@ -27,18 +29,31 @@ const EMPTY_TRACK: TrackProgress = {
 	totalCorrect: 0,
 	dailyXp: 0,
 	dailyXpDate: null,
+	freezesAvailable: 0,
 };
 
 const DAILY_GOAL = 50;
 
 const DEFAULT_PROGRESS: ProgressState = {
-	tracks: {
-		beginner: { ...EMPTY_TRACK },
-		intermediate: { ...EMPTY_TRACK },
-		expert: { ...EMPTY_TRACK },
-	},
+	progress: { ...EMPTY_PROGRESS },
 	activeTrack: 'beginner',
 };
+
+/** Shape of pre-v0.1.1 stored progress with one entry per track. */
+interface LegacyTrackProgress {
+	xp: number;
+	streak: number;
+	lastReviewDate: string | null;
+	totalAnswered: number;
+	totalCorrect: number;
+	dailyXp: number;
+	dailyXpDate: string | null;
+}
+interface LegacyProgressState {
+	tracks?: Partial<Record<Track, Partial<LegacyTrackProgress>>>;
+	progress?: UserProgress;
+	activeTrack?: Track;
+}
 
 interface SerializedStoredCard {
 	question: Question;
@@ -65,9 +80,9 @@ export class FSRSManager {
 		return this.loadModules().find((m) => m.id === id);
 	}
 
-	listModules(track: Track): ModuleSummary[] {
+	/** Lists ALL modules in this workspace regardless of difficulty track. */
+	listModules(): ModuleSummary[] {
 		return this.loadModules()
-			.filter((m) => m.track === track)
 			.sort((a, b) => b.createdAt - a.createdAt)
 			.map((m) => ({
 				id: m.id,
@@ -164,25 +179,81 @@ export class FSRSManager {
 		return this.loadCards();
 	}
 
-	dueCards(track: Track, now = new Date()): StoredCard[] {
-		return this.loadCards().filter(
-			(c) => c.question.track === track && c.card.due.getTime() <= now.getTime()
-		);
+	/** Removes a module and its associated FSRS review cards. Returns whether anything was deleted. */
+	deleteModule(moduleId: string): { deleted: boolean; questionsRemoved: number } {
+		const modules = this.loadModules();
+		const idx = modules.findIndex((m) => m.id === moduleId);
+		if (idx === -1) {
+			return { deleted: false, questionsRemoved: 0 };
+		}
+		const removedQuestionIds = new Set<string>();
+		for (const lesson of modules[idx].lessons) {
+			for (const q of lesson.questions ?? []) {
+				removedQuestionIds.add(q.id);
+			}
+		}
+		modules.splice(idx, 1);
+		void this.context.workspaceState.update(MODULES_KEY, modules);
+
+		if (removedQuestionIds.size > 0) {
+			const cards = this.loadCards().filter((c) => !removedQuestionIds.has(c.question.id));
+			this.saveCards(cards);
+		}
+		return { deleted: true, questionsRemoved: removedQuestionIds.size };
+	}
+
+	/** Returns ALL due cards regardless of difficulty track. */
+	dueCards(now = new Date()): StoredCard[] {
+		return this.loadCards().filter((c) => c.card.due.getTime() <= now.getTime());
 	}
 
 	getProgress(): ProgressState {
-		const stored = this.context.globalState.get<ProgressState>(PROGRESS_KEY);
+		const stored = this.context.globalState.get<LegacyProgressState>(PROGRESS_KEY);
 		if (!stored) {
 			return cloneProgress(DEFAULT_PROGRESS);
 		}
 		const today = dateKey(new Date());
-		const tracks: ProgressState['tracks'] = {
-			beginner: normalizeTrack(stored.tracks?.beginner, today),
-			intermediate: normalizeTrack(stored.tracks?.intermediate, today),
-			expert: normalizeTrack(stored.tracks?.expert, today),
+		const activeTrack: Track =
+			stored.activeTrack && TRACKS.includes(stored.activeTrack) ? stored.activeTrack : 'beginner';
+
+		// Migration path: stored data from before v0.1.1 had per-track progress.
+		// Combine into a single shared pool. Sum lifetime counters, take max streak,
+		// and only carry today's dailyXp (entries from prior days reset).
+		if (!stored.progress && stored.tracks) {
+			const t = stored.tracks;
+			const merged: UserProgress = {
+				xp: (t.beginner?.xp ?? 0) + (t.intermediate?.xp ?? 0) + (t.expert?.xp ?? 0),
+				streak: Math.max(
+					t.beginner?.streak ?? 0,
+					t.intermediate?.streak ?? 0,
+					t.expert?.streak ?? 0
+				),
+				lastReviewDate: latestDate([
+					t.beginner?.lastReviewDate ?? null,
+					t.intermediate?.lastReviewDate ?? null,
+					t.expert?.lastReviewDate ?? null,
+				]),
+				totalAnswered:
+					(t.beginner?.totalAnswered ?? 0) +
+					(t.intermediate?.totalAnswered ?? 0) +
+					(t.expert?.totalAnswered ?? 0),
+				totalCorrect:
+					(t.beginner?.totalCorrect ?? 0) +
+					(t.intermediate?.totalCorrect ?? 0) +
+					(t.expert?.totalCorrect ?? 0),
+				dailyXp:
+					(t.beginner?.dailyXpDate === today ? t.beginner.dailyXp ?? 0 : 0) +
+					(t.intermediate?.dailyXpDate === today ? t.intermediate.dailyXp ?? 0 : 0) +
+					(t.expert?.dailyXpDate === today ? t.expert.dailyXp ?? 0 : 0),
+				dailyXpDate: today,
+			};
+			return { progress: normalizeProgress(merged, today), activeTrack };
+		}
+
+		return {
+			progress: normalizeProgress(stored.progress, today),
+			activeTrack,
 		};
-		const activeTrack = TRACKS.includes(stored.activeTrack) ? stored.activeTrack : 'beginner';
-		return { tracks, activeTrack };
 	}
 
 	getDailyGoal(): number {
@@ -239,48 +310,83 @@ export class FSRSManager {
 		xpDelta: number
 	): Promise<ProgressState> {
 		const prev = this.getProgress();
-		const trackPrev = prev.tracks[track];
+		const cur = prev.progress;
 		const today = dateKey(new Date());
-		const yesterday = dateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
 
-		let streak = trackPrev.streak;
-		if (trackPrev.lastReviewDate !== today) {
-			if (trackPrev.lastReviewDate === yesterday || trackPrev.lastReviewDate === null) {
-				streak = correct ? trackPrev.streak + 1 : Math.max(0, trackPrev.streak);
+		let streak = cur.streak;
+		let freezesAvailable = cur.freezesAvailable ?? 0;
+		let freezesConsumed = 0;
+		const dayGap = daysBetween(cur.lastReviewDate, today);
+
+		if (dayGap === 0) {
+			// Already reviewed today — streak unchanged.
+		} else if (dayGap === 1 || cur.lastReviewDate === null) {
+			// Yesterday or first ever review — clean continuation.
+			streak = correct ? streak + 1 : Math.max(0, streak);
+		} else {
+			// Missed `dayGap - 1` days. Spend freezes to plug the gap if possible.
+			const missed = dayGap - 1;
+			if (streak > 0 && freezesAvailable >= missed) {
+				freezesAvailable -= missed;
+				freezesConsumed = missed;
+				streak = correct ? streak + 1 : streak;
 			} else {
+				// Not enough freezes — streak breaks.
 				streak = correct ? 1 : 0;
+				freezesAvailable = Math.max(0, freezesAvailable - missed);
+				freezesConsumed = Math.min(freezesAvailable + missed, missed);
 			}
 		}
 
-		const dailyReset = trackPrev.dailyXpDate !== today;
-		const updatedTrack: TrackProgress = {
-			xp: trackPrev.xp + xpDelta,
+		// Earn 1 freeze per 7-day streak milestone (7, 14, 21…) capped at MAX_FREEZES.
+		const prevMilestones = Math.floor(cur.streak / FREEZE_EARN_EVERY_DAYS);
+		const newMilestones = Math.floor(streak / FREEZE_EARN_EVERY_DAYS);
+		const earned = Math.max(0, newMilestones - prevMilestones);
+		if (earned > 0) {
+			freezesAvailable = Math.min(MAX_FREEZES, freezesAvailable + earned);
+		}
+
+		const dailyReset = cur.dailyXpDate !== today;
+		const updated: UserProgress = {
+			xp: cur.xp + xpDelta,
 			streak,
 			lastReviewDate: today,
-			totalAnswered: trackPrev.totalAnswered + 1,
-			totalCorrect: trackPrev.totalCorrect + (correct ? 1 : 0),
-			dailyXp: (dailyReset ? 0 : trackPrev.dailyXp) + xpDelta,
+			totalAnswered: cur.totalAnswered + 1,
+			totalCorrect: cur.totalCorrect + (correct ? 1 : 0),
+			dailyXp: (dailyReset ? 0 : cur.dailyXp) + xpDelta,
 			dailyXpDate: today,
+			freezesAvailable,
 		};
 
-		// Streak transitions — fire BEFORE persisting so the dashboard can
-		// see the transition with the new value attached.
-		if (streak > trackPrev.streak) {
+		// Streak transitions — telemetry still tags the difficulty that earned the change.
+		if (streak > cur.streak) {
 			this.telemetry?.track('progress.streak_extended', { track, streakDays: streak });
-		} else if (streak === 0 && trackPrev.streak > 0) {
-			this.telemetry?.track('progress.streak_broken', { track, previousStreak: trackPrev.streak });
+		} else if (streak === 0 && cur.streak > 0) {
+			this.telemetry?.track('progress.streak_broken', { track, previousStreak: cur.streak });
+		}
+		if (freezesConsumed > 0) {
+			this.telemetry?.track('progress.streak_freeze_used', {
+				track,
+				freezesConsumed,
+				freezesRemaining: freezesAvailable,
+				gapDays: dayGap,
+			});
+		}
+		if (earned > 0) {
+			this.telemetry?.track('progress.streak_freeze_earned', {
+				track,
+				earned,
+				freezesAvailable,
+				streakDays: streak,
+			});
 		}
 
-		// Daily-goal crossing event — only emit on the transition.
-		const prevDaily = dailyReset ? 0 : trackPrev.dailyXp;
-		if (prevDaily < DAILY_GOAL && updatedTrack.dailyXp >= DAILY_GOAL) {
-			this.telemetry?.track('progress.daily_goal_met', { track, dailyXp: updatedTrack.dailyXp });
+		const prevDaily = dailyReset ? 0 : cur.dailyXp;
+		if (prevDaily < DAILY_GOAL && updated.dailyXp >= DAILY_GOAL) {
+			this.telemetry?.track('progress.daily_goal_met', { track, dailyXp: updated.dailyXp });
 		}
 
-		const next: ProgressState = {
-			...prev,
-			tracks: { ...prev.tracks, [track]: updatedTrack },
-		};
+		const next: ProgressState = { ...prev, progress: updated };
 		await this.context.globalState.update(PROGRESS_KEY, next);
 		return next;
 	}
@@ -331,22 +437,44 @@ export class FSRSManager {
 function cloneProgress(p: ProgressState): ProgressState {
 	return {
 		activeTrack: p.activeTrack,
-		tracks: {
-			beginner: { ...p.tracks.beginner },
-			intermediate: { ...p.tracks.intermediate },
-			expert: { ...p.tracks.expert },
-		},
+		progress: { ...p.progress },
 	};
 }
 
-function normalizeTrack(raw: Partial<TrackProgress> | undefined, today: string): TrackProgress {
-	const base: TrackProgress = { ...EMPTY_TRACK, ...(raw ?? {}) };
+function normalizeProgress(raw: Partial<UserProgress> | undefined, today: string): UserProgress {
+	const base: UserProgress = { ...EMPTY_PROGRESS, ...(raw ?? {}) };
 	if (base.dailyXpDate !== today) {
 		base.dailyXp = 0;
 	}
 	return base;
 }
 
+function latestDate(dates: (string | null)[]): string | null {
+	let best: string | null = null;
+	for (const d of dates) {
+		if (d && (best === null || d > best)) {
+			best = d;
+		}
+	}
+	return best;
+}
+
 function dateKey(d: Date): string {
 	return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Returns the number of whole days between two YYYY-MM-DD strings.
+ * `null` from is treated as Infinity (no prior reviews → streak start).
+ */
+function daysBetween(from: string | null, to: string): number {
+	if (!from) {
+		return Number.POSITIVE_INFINITY;
+	}
+	const fromMs = Date.parse(from + 'T00:00:00Z');
+	const toMs = Date.parse(to + 'T00:00:00Z');
+	if (Number.isNaN(fromMs) || Number.isNaN(toMs)) {
+		return Number.POSITIVE_INFINITY;
+	}
+	return Math.round((toMs - fromMs) / (24 * 60 * 60 * 1000));
 }

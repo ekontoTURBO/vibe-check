@@ -26,6 +26,7 @@ export interface ViewProgress {
 	rank: string | null;
 	totalAnswered: number;
 	totalCorrect: number;
+	freezesAvailable: number;
 }
 
 export interface ModulePathLesson {
@@ -120,6 +121,9 @@ export type ClientMessage =
 	| { type: 'openPicker' }
 	| { type: 'closePicker' }
 	| { type: 'newModule'; topic: Topic }
+	| { type: 'deleteModule'; moduleId: string }
+	| { type: 'cancelGeneration' }
+	| { type: 'rateQuestion'; questionId: string; rating: 'up' | 'down' }
 	| { type: 'startLesson'; moduleId: string; lessonId: string }
 	| { type: 'startReview' }
 	| { type: 'submitAnswer'; questionId: string; answer: AnswerPayload; correct: boolean }

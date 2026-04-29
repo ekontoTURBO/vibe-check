@@ -83,12 +83,15 @@ If we ever add a field to an event, we will add it to the table below in the sam
 | `module.generation_started` | `topic`, `track`, `source: 'manual' \| 'auto-pulse' \| 'selection'`, `mixed: boolean`, `contextChars: number`, `lessonCount`, `questionsPerLesson` |
 | `module.generation_completed` | `topic`, `track`, `durationMs`, `lessons` |
 | `module.generation_failed` | `topic`, `track`, `provider`, `errorClass` |
+| `module.generation_cancelled` | — *(user clicked CANCEL on the GENERATING overlay)* |
 | `module.opened` | `lessonsTotal`, `lessonsCompleted` |
 | `module.completed` | `totalLessons`, `totalQuestions` |
 | `module.abandoned` | `atLessonIndex`, `lessonsCompleted`, `totalLessons` |
+| `module.deleted` | `questionsRemoved`, `deleted` |
 | `lesson.started` | `lessonIndex`, `questionCount`, `track`, `topic`, `isReview` |
 | `lesson.exited` | `lessonIndex`, `answeredCount`, `totalQuestions` |
 | `lesson.completed` | `lessonIndex`, `correct`, `total`, `passed`, `track`, `topic`, `durationMs`, `isReview` |
+| `lesson.prefetch_completed` | `lessonIndex`, `durationMs` *(background prefetch of next lesson)* |
 
 ### Questions
 
@@ -100,6 +103,7 @@ If we ever add a field to an event, we will add it to the table below in the sam
 | `question.code_ref_clicked` | `type` |
 | `question.code_show_clicked` | `type` |
 | `question.tried_again` | `type` |
+| `question.rated` | `rating: 'up' \| 'down'`, `type` *(thumbs up/down on a question)* |
 
 *(Note: question prompts, options, and code snippets are **never** sent. Only the type and counts.)*
 
@@ -119,6 +123,8 @@ If we ever add a field to an event, we will add it to the table below in the sam
 | `progress.daily_goal_met` | `track`, `dailyXp` |
 | `progress.streak_extended` | `track`, `streakDays` |
 | `progress.streak_broken` | `track`, `previousStreak` |
+| `progress.streak_freeze_used` | `track`, `freezesConsumed`, `freezesRemaining`, `gapDays` *(a freeze covered a missed day)* |
+| `progress.streak_freeze_earned` | `track`, `earned`, `freezesAvailable`, `streakDays` *(crossed a 7-day streak milestone)* |
 | `progress.reset` | — |
 
 ### Pulse (auto-detection of large AI insertions)

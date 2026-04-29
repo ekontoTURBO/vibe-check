@@ -11,6 +11,7 @@ const EMPTY_STATE: ViewState = {
 		rank: null,
 		totalAnswered: 0,
 		totalCorrect: 0,
+		freezesAvailable: 0,
 	},
 	modules: [],
 	activeModule: null,

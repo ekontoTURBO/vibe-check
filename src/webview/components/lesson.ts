@@ -49,10 +49,13 @@ function shuffleSeq(length: number, seed: string): number[] {
 	return arr;
 }
 
+const TRACK_LABEL = { beginner: 'BEG', intermediate: 'INT', expert: 'EXP' } as const;
+
 function questionHeader(lesson: ActiveLessonState): HTMLElement {
 	const q = lesson.currentIndex + 1;
 	const total = lesson.questions.length;
 	const pct = (q / total) * 100;
+	const track = lesson.track;
 
 	return h(
 		'div',
@@ -77,6 +80,7 @@ function questionHeader(lesson: ActiveLessonState): HTMLElement {
 					h('div', { className: 'fill', style: { width: `${pct}%` } })
 				)
 			),
+			h('span', { className: `vc-track-chip vc-track-chip--${track}` }, TRACK_LABEL[track]),
 			h('span', { className: 'vc-qheader__counter' }, `${q}/${total}`)
 		)
 	);
@@ -429,21 +433,52 @@ function checkAnswer(q: Question): { correct: boolean; payload: AnswerPayload | 
 	};
 }
 
+function isQuestionReady(q: Question): boolean {
+	if (q.type === 'multiple-choice') {
+		return typeof local?.mc === 'number';
+	}
+	if (q.type === 'fill-blank') {
+		return typeof local?.fillBlank === 'number';
+	}
+	return !!local?.order;
+}
+
+function submitCurrent(q: Question, lesson: ActiveLessonState): boolean {
+	const r = checkAnswer(q);
+	if (!r.payload) {
+		return false;
+	}
+	const xpDelta = r.correct ? trackXp(lesson.track) : 0;
+	const correctText = correctAnswerText(q);
+	const fb: FeedbackUiState = {
+		questionId: q.id,
+		correct: r.correct,
+		canonicalMessage: q.explanation,
+		personalizedMessage: null,
+		personalizedLoading: false,
+		personalizedRequested: false,
+		userAnswerText: r.userText,
+		correctAnswerText: correctText,
+		xpDelta,
+	};
+	store.setFeedback(fb);
+	send({
+		type: 'submitAnswer',
+		questionId: q.id,
+		answer: r.payload,
+		correct: r.correct,
+	});
+	return true;
+}
+
 function submitButton(q: Question, lesson: ActiveLessonState): HTMLElement {
-	const isReady =
-		q.type === 'multiple-choice'
-			? typeof local?.mc === 'number'
-			: q.type === 'fill-blank'
-			? typeof local?.fillBlank === 'number'
-			: q.type === 'code-order'
-			? !!local?.order
-			: false;
+	const ready = isQuestionReady(q);
 	const label =
 		q.type === 'code-order'
-			? 'CHECK ORDER'
+			? 'CHECK ORDER  ⏎'
 			: q.type === 'fill-blank'
-			? 'FILL IT'
-			: 'CHECK ANSWER';
+			? 'FILL IT  ⏎'
+			: 'CHECK ANSWER  ⏎';
 	return h(
 		'div',
 		{ className: 'vc-question-actions' },
@@ -451,33 +486,10 @@ function submitButton(q: Question, lesson: ActiveLessonState): HTMLElement {
 			'button',
 			{
 				className: 'pbtn pbtn--block',
-				disabled: !isReady,
+				disabled: !ready,
 				on: {
 					click: () => {
-						const r = checkAnswer(q);
-						if (!r.payload) {
-							return;
-						}
-						const xpDelta = r.correct ? trackXp(lesson.track) : 0;
-						const correctText = correctAnswerText(q);
-						const fb: FeedbackUiState = {
-							questionId: q.id,
-							correct: r.correct,
-							canonicalMessage: q.explanation,
-							personalizedMessage: null,
-							personalizedLoading: false,
-							personalizedRequested: false,
-							userAnswerText: r.userText,
-							correctAnswerText: correctText,
-							xpDelta,
-						};
-						store.setFeedback(fb);
-						send({
-							type: 'submitAnswer',
-							questionId: q.id,
-							answer: r.payload,
-							correct: r.correct,
-						});
+						submitCurrent(q, lesson);
 					},
 				},
 			},
@@ -506,23 +518,85 @@ function correctAnswerText(q: Question): string {
 
 export function clearLessonLocalSelection(): void {
 	local = null;
+	uninstallKeyHandler();
 }
 
 export function resetCurrentLessonSelection(): void {
 	local = null;
 }
 
+let activeKeyHandler: ((ev: KeyboardEvent) => void) | null = null;
+
+function uninstallKeyHandler(): void {
+	if (activeKeyHandler) {
+		document.removeEventListener('keydown', activeKeyHandler);
+		activeKeyHandler = null;
+	}
+}
+
+/**
+ * Install keyboard shortcuts for the active lesson question.
+ * 1-4 selects MC/fill-blank options. Enter submits when ready or advances after feedback.
+ * Idempotent — safe to call on every render.
+ */
+function installKeyHandler(q: Question, lesson: ActiveLessonState, hasFeedback: boolean): void {
+	uninstallKeyHandler();
+	const handler = (ev: KeyboardEvent): void => {
+		// Don't interfere with text inputs (none in lesson currently, but defensive).
+		const tag = (ev.target as HTMLElement | null)?.tagName;
+		if (tag === 'INPUT' || tag === 'TEXTAREA') {
+			return;
+		}
+		// Number keys 1-4 select an option for MC / fill-blank (when not in feedback state).
+		if (!hasFeedback && (q.type === 'multiple-choice' || q.type === 'fill-blank')) {
+			const idx = ['1', '2', '3', '4'].indexOf(ev.key);
+			if (idx !== -1 && idx < q.options.length) {
+				ev.preventDefault();
+				const sel = ensureLocal(q);
+				if (q.type === 'multiple-choice') {
+					sel.mc = idx;
+				} else {
+					sel.fillBlank = idx;
+				}
+				store.patch({});
+				return;
+			}
+		}
+		// Enter: submit if ready and no feedback yet, else advance/next.
+		if (ev.key === 'Enter') {
+			if (!hasFeedback) {
+				if (isQuestionReady(q)) {
+					ev.preventDefault();
+					submitCurrent(q, lesson);
+				}
+				return;
+			}
+			// In feedback state — Enter advances (NEXT or TRY AGAIN-style flow handled by feedback.ts).
+			ev.preventDefault();
+			const nextBtn = document.querySelector<HTMLButtonElement>('.vc-feedback .pbtn--green, .vc-feedback .pbtn--cyan');
+			nextBtn?.click();
+		}
+	};
+	document.addEventListener('keydown', handler);
+	activeKeyHandler = handler;
+}
+
 export function renderLessonScreen(state: ViewState): HTMLElement | null {
 	const lesson = state.activeLesson;
 	if (!lesson) {
+		uninstallKeyHandler();
 		return null;
 	}
+
 	const q = lesson.questions[lesson.currentIndex];
 	if (!q) {
+		uninstallKeyHandler();
 		return null;
 	}
 
 	const fb = state.feedback && state.feedback.questionId === q.id ? state.feedback : null;
+
+	installKeyHandler(q, lesson, !!fb);
 
 	const body =
 		q.type === 'multiple-choice'

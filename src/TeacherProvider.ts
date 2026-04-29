@@ -197,12 +197,35 @@ Now write the personalized explanation of WHY their answer is wrong.`;
 	async generateLessonQuestions(module: Module, lesson: ModuleLesson): Promise<Question[]> {
 		const questionsPerLesson = module.questionsPerLesson ?? 5;
 		const lessonTopic = lesson.topic ?? module.topic;
-		const system = this.buildLessonSystemPrompt(module, lesson, lessonTopic, questionsPerLesson);
-		const user = this.buildContextPrompt(module.contextLabel, module.context);
-		// Scale token budget with question count (was a flat 1500 regardless of size).
-		const maxTokens = Math.min(2000, 350 + questionsPerLesson * 280);
-		const raw = await this.llm.complete({ system, user, maxTokens });
-		const parsed = this.parseQuestions(raw);
+		const minQuestions = Math.min(2, questionsPerLesson);
+
+		const attempt = async (strict: boolean): Promise<ParsedQuestion[]> => {
+			const system = this.buildLessonSystemPrompt(
+				module,
+				lesson,
+				lessonTopic,
+				questionsPerLesson,
+				strict
+			);
+			const user = this.buildContextPrompt(module.contextLabel, module.context);
+			const maxTokens = Math.min(2000, 350 + questionsPerLesson * 280);
+			const raw = await this.llm.complete({ system, user, maxTokens });
+			return this.parseQuestions(raw);
+		};
+
+		let parsed = await attempt(false);
+		if (parsed.length < minQuestions) {
+			// One automatic retry with a stricter "you MUST return at least N" instruction.
+			console.warn(
+				`[VibeCheck] Lesson returned ${parsed.length} questions, minimum is ${minQuestions} — retrying once`
+			);
+			parsed = await attempt(true);
+			if (parsed.length < minQuestions) {
+				throw new Error(
+					`Model only returned ${parsed.length} question${parsed.length === 1 ? '' : 's'} after a retry. Try regenerating, or open a richer file with more behaviour to quiz on.`
+				);
+			}
+		}
 
 		return parsed.map((p, i) =>
 			this.toQuestion(p, module, lesson, lessonTopic, module.baseLine, i)
@@ -271,9 +294,14 @@ RULES
 		module: Module,
 		lesson: ModuleLesson,
 		lessonTopic: Topic,
-		questionsPerLesson: number
+		questionsPerLesson: number,
+		strict = false
 	): string {
-		return `You are generating up to ${questionsPerLesson} questions for ONE specific lesson in a Duolingo-style module. Use closed questions only (no free text).
+		const minQ = Math.min(2, questionsPerLesson);
+		const headerCountLine = strict
+			? `You MUST return BETWEEN ${minQ} AND ${questionsPerLesson} questions. Returning fewer than ${minQ} is invalid output. A previous attempt failed for this exact reason — do not return only one question.`
+			: `Return up to ${questionsPerLesson} questions, minimum ${minQ}.`;
+		return `You are generating closed questions for ONE specific lesson in a Duolingo-style module. ${headerCountLine}
 
 MODULE: "${module.title}"
 THIS LESSON's TOPIC ANGLE: ${lessonTopic} — ${TOPIC_GUIDE[lessonTopic]}
@@ -283,7 +311,7 @@ THIS LESSON (lesson ${lesson.index + 1})
 - Title: "${lesson.title}"
 - Objective: ${lesson.objective}
 
-Generate UP TO ${questionsPerLesson} closed questions matching this lesson's objective and the track's difficulty. If the context truly does not support that many high-quality questions, return fewer (minimum 2). Better to have 3 sharp questions than 5 with trivia.
+Generate between ${minQ} and ${questionsPerLesson} closed questions matching this lesson's objective and the track's difficulty. If the context truly does not support the maximum, return fewer — but NEVER fewer than ${minQ}. Better to have 3 sharp questions than 5 with trivia, but never fewer than ${minQ} or the lesson is unusable.
 
 NEVER REFUSE. Never return a sentence saying the context is too small. Even minimal context (a single function, a tree of folder names, a config file) supports at least 2 questions about what IS visible — about file roles, about which directory owns which concern, about what a config flag does. If you genuinely cannot find 2 things to ask, ask about the most prominent visible elements (file purpose, dependency role, directory responsibility). The response MUST be a JSON object with a "questions" array — no prose, no apology, no markdown fences.
 
@@ -594,23 +622,98 @@ function shuffleOptions(
 
 function parseJsonObject(raw: string): unknown {
 	const cleaned = stripFences(raw).trim();
-	const start = cleaned.indexOf('{');
-	const end = cleaned.lastIndexOf('}');
-	if (start === -1 || end === -1 || end <= start) {
-		// Detect refusal-style replies and translate them into something the user can act on.
-		if (looksLikeRefusal(cleaned)) {
+	if (looksLikeRefusal(cleaned) && !cleaned.includes('{')) {
+		throw new Error(
+			"The model refused to generate questions for this context. This usually means the workspace is too small or generic. Try opening a richer file or selecting a specific code block, then run 'Quiz Me On Selection'."
+		);
+	}
+
+	// Strategy 1: balanced-brace scan — find the FIRST top-level '{...}' that parses.
+	// This survives narrative prefixes like "Sure! Here's the JSON: {...}" where a `{`
+	// might appear inside the prose before the real object starts.
+	const scanned = extractFirstJsonObject(cleaned);
+	if (scanned) {
+		try {
+			return JSON.parse(scanned);
+		} catch (err) {
+			// Strategy 2: tolerant re-parse — repair common LLM mistakes (unquoted keys,
+			// trailing commas, single-quoted strings) and try again.
+			const repaired = repairJson(scanned);
+			if (repaired !== scanned) {
+				try {
+					return JSON.parse(repaired);
+				} catch {
+					// fall through to error
+				}
+			}
+			console.error('[VibeCheck] JSON parse failed. Raw response:\n' + raw.slice(0, 2000));
 			throw new Error(
-				"The model refused to generate questions for this context. This usually means the workspace is too small or generic. Try opening a richer file or selecting a specific code block, then run 'Quiz Me On Selection'."
+				`JSON parse failed: ${(err as Error).message}. The model returned malformed JSON — see the developer console for the full response.`
 			);
 		}
-		throw new Error(`Response was not JSON. Got: ${cleaned.slice(0, 200)}`);
 	}
-	const slice = cleaned.slice(start, end + 1);
-	try {
-		return JSON.parse(slice);
-	} catch (err) {
-		throw new Error(`JSON parse failed: ${(err as Error).message}`);
+
+	// No balanced object found at all.
+	if (looksLikeRefusal(cleaned)) {
+		throw new Error(
+			"The model refused to generate questions for this context. Try opening a richer file or selecting a specific code block, then run 'Quiz Me On Selection'."
+		);
 	}
+	console.error('[VibeCheck] No JSON object found in response. Raw:\n' + raw.slice(0, 2000));
+	throw new Error(`Response was not JSON. Got: ${cleaned.slice(0, 200)}`);
+}
+
+/** Find the first top-level balanced-brace JSON object in `s`. Skips '{' inside strings. */
+function extractFirstJsonObject(s: string): string | null {
+	for (let i = 0; i < s.length; i++) {
+		if (s[i] !== '{') {
+			continue;
+		}
+		let depth = 0;
+		let inString = false;
+		let escape = false;
+		for (let j = i; j < s.length; j++) {
+			const c = s[j];
+			if (escape) {
+				escape = false;
+				continue;
+			}
+			if (c === '\\') {
+				escape = true;
+				continue;
+			}
+			if (c === '"') {
+				inString = !inString;
+				continue;
+			}
+			if (inString) {
+				continue;
+			}
+			if (c === '{') {
+				depth++;
+			} else if (c === '}') {
+				depth--;
+				if (depth === 0) {
+					return s.slice(i, j + 1);
+				}
+			}
+		}
+		// Unbalanced from this '{' — try the next one.
+	}
+	return null;
+}
+
+/** Best-effort repair of common LLM JSON mistakes. Conservative — only safe transforms. */
+function repairJson(s: string): string {
+	let out = s;
+	// Strip line/block comments that some models leave in (// ... or /* ... */).
+	out = out.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+	// Trailing commas before } or ]
+	out = out.replace(/,(\s*[}\]])/g, '$1');
+	// Unquoted property names — e.g. {questions: [...]} → {"questions": [...]}
+	// Match `{` or `,` followed by whitespace + identifier + `:`. Only ASCII identifiers.
+	out = out.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3');
+	return out;
 }
 
 function looksLikeRefusal(text: string): boolean {

@@ -1,10 +1,42 @@
 import { h } from '../dom';
-import { glitch } from '../pixelArt';
+import { glitch, pixelIcon } from '../pixelArt';
 import { send } from '../api';
 import { store } from '../store';
 import { resetCurrentLessonSelection } from './lesson';
 import { renderPromptText } from '../promptText';
 import type { ActiveLessonState, FeedbackUiState, Question } from '../types';
+
+function rateButtons(questionId: string): HTMLElement {
+	let rated: 'up' | 'down' | null = null;
+	const wrap = h('div', { className: 'vc-rate' });
+	const make = (rating: 'up' | 'down', title: string): HTMLElement => {
+		const icon = pixelIcon(rating === 'up' ? 'thumbUp' : 'thumbDown', { scale: 2 });
+		const btn = h(
+			'button',
+			{
+				className: `vc-rate__btn vc-rate__btn--${rating}`,
+				title,
+				'aria-label': title,
+				on: {
+					click: (ev) => {
+						ev.stopPropagation();
+						if (rated) {
+							return;
+						}
+						rated = rating;
+						btn.classList.add('vc-rate__btn--active');
+						send({ type: 'rateQuestion', questionId, rating });
+					},
+				},
+			},
+			icon
+		);
+		return btn;
+	};
+	wrap.appendChild(make('up', 'Good question'));
+	wrap.appendChild(make('down', 'Bad question — flag for review'));
+	return wrap;
+}
 
 export function renderFeedback(
 	fb: FeedbackUiState,
@@ -19,7 +51,12 @@ export function renderFeedback(
 			h(
 				'div',
 				{ className: 'vc-feedback__body' },
-				h('div', { className: 'vc-feedback__title' }, `NICE! +${fb.xpDelta} XP`),
+				h(
+					'div',
+					{ className: 'vc-feedback__row' },
+					h('div', { className: 'vc-feedback__title' }, `NICE! +${fb.xpDelta} XP`),
+					rateButtons(q.id)
+				),
 				h(
 					'div',
 					{ className: 'vc-feedback__msg' },
@@ -61,7 +98,12 @@ export function renderFeedback(
 		h(
 			'div',
 			{ className: 'vc-feedback__body' },
-			h('div', { className: 'vc-feedback__title' }, 'NOT QUITE'),
+			h(
+				'div',
+				{ className: 'vc-feedback__row' },
+				h('div', { className: 'vc-feedback__title' }, 'NOT QUITE'),
+				rateButtons(q.id)
+			),
 			h('div', { className: 'vc-feedback__msg' }, messageNodes),
 			h(
 				'div',

@@ -302,7 +302,45 @@ const ICON_CAP = `
 ....00....
 `;
 
-export type IconKind = 'flame' | 'star' | 'lock' | 'check' | 'heart' | 'trophy' | 'code' | 'cap';
+/* Thumb up — outline 0, fill 1. 10x10. */
+const ICON_THUMB_UP = `
+..........
+....00....
+...0110...
+...0110...
+.000110...
+01111100..
+01111110..
+01111110..
+00000000..
+..........
+`;
+
+/* Thumb down — vertical flip of thumb up. 10x10. */
+const ICON_THUMB_DOWN = `
+..........
+00000000..
+01111110..
+01111110..
+01111100..
+.000110...
+...0110...
+...0110...
+....00....
+..........
+`;
+
+export type IconKind =
+	| 'flame'
+	| 'star'
+	| 'lock'
+	| 'check'
+	| 'heart'
+	| 'trophy'
+	| 'code'
+	| 'cap'
+	| 'thumbUp'
+	| 'thumbDown';
 
 interface IconDef {
 	art: string;
@@ -354,6 +392,22 @@ const ICON_REGISTRY: Record<IconKind, IconDef> = {
 	cap: {
 		art: ICON_CAP,
 		build: (color) => ({ '.': 'transparent', '0': color }),
+	},
+	thumbUp: {
+		art: ICON_THUMB_UP,
+		build: () => ({
+			'.': 'transparent',
+			'0': '#1a1a1a',
+			'1': '#ffd23f',
+		}),
+	},
+	thumbDown: {
+		art: ICON_THUMB_DOWN,
+		build: () => ({
+			'.': 'transparent',
+			'0': '#1a1a1a',
+			'1': '#ff5a6a',
+		}),
 	},
 };
 

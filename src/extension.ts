@@ -117,6 +117,18 @@ export function activate(context: vscode.ExtensionContext) {
 
 	let lastModuleAt = 0;
 	let inFlight = false;
+	let currentToken: { cancelled: boolean } | null = null;
+
+	sidebar.setCancelGenerationHandler(() => {
+		if (!inFlight || !currentToken) {
+			return;
+		}
+		currentToken.cancelled = true;
+		telemetry.track('module.generation_cancelled', {});
+		inFlight = false;
+		sidebar.setGenerating(false);
+		sidebar.notifyError('Generation cancelled.');
+	});
 
 	const generateModule = async (
 		topic: Topic,
@@ -134,11 +146,16 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		const track = fsrs.getProgress().activeTrack;
 		inFlight = true;
+		const token = { cancelled: false };
+		currentToken = token;
 		sidebar.setGenerating(true, topic);
 
 		const startedAt = Date.now();
 		try {
 			const ctx = await gatherer.gather(topic, opts);
+			if (token.cancelled) {
+				return;
+			}
 			const topicMix = opts?.mixed
 				? pickMixedTopics(sizeForContext(ctx.content.length).lessons)
 				: undefined;
@@ -163,6 +180,10 @@ export function activate(context: vscode.ExtensionContext) {
 				baseLine: ctx.lineRange?.start ?? 0,
 				topicMix,
 			});
+			if (token.cancelled) {
+				// Discard the in-flight result — user backed out while the LLM was still thinking.
+				return;
+			}
 			fsrs.addModule(module);
 			lastModuleAt = Date.now();
 			telemetry.track('module.generation_completed', {
@@ -176,6 +197,9 @@ export function activate(context: vscode.ExtensionContext) {
 				`Vibe Check: created module "${module.title}" with ${module.lessons.length} lesson${module.lessons.length === 1 ? '' : 's'}.`
 			);
 		} catch (err) {
+			if (token.cancelled) {
+				return;
+			}
 			const msg = (err as Error).message;
 			console.error('[VibeCheck] Module generation failed:', err);
 			let providerLabel = 'unknown';
@@ -193,8 +217,13 @@ export function activate(context: vscode.ExtensionContext) {
 			sidebar.notifyError(`Module generation failed: ${msg}`);
 			vscode.window.showWarningMessage(`Vibe Check: ${msg}`);
 		} finally {
-			inFlight = false;
-			sidebar.setGenerating(false);
+			if (currentToken === token) {
+				currentToken = null;
+				if (!token.cancelled) {
+					inFlight = false;
+					sidebar.setGenerating(false);
+				}
+			}
 		}
 	};
 
@@ -224,7 +253,10 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		let questions = lesson.questions;
-		if (!questions || questions.length === 0) {
+		// Treat lessons with < 2 questions as stale (older builds let single-question lessons through,
+		// which causes the lesson to immediately complete after one answer). Regenerate.
+		const needsRegen = !questions || questions.length < 2;
+		if (needsRegen) {
 			sidebar.setGenerating(true, module.topic);
 			try {
 				questions = await teacher.generateLessonQuestions(module, lesson);
@@ -237,6 +269,30 @@ export function activate(context: vscode.ExtensionContext) {
 			} finally {
 				sidebar.setGenerating(false);
 			}
+		}
+
+		// Prefetch next lesson's questions in the background — by the time the user passes,
+		// the next lesson is already loaded so unlocking is instant.
+		const nextLesson = module.lessons[lesson.index + 1];
+		if (nextLesson && (!nextLesson.questions || nextLesson.questions.length === 0)) {
+			void (async () => {
+				try {
+					const prefetchStart = Date.now();
+					const next = await teacher.generateLessonQuestions(module, nextLesson);
+					fsrs.saveLessonQuestions(module.id, nextLesson.id, next);
+					telemetry.track('lesson.prefetch_completed', {
+						lessonIndex: nextLesson.index,
+						durationMs: Date.now() - prefetchStart,
+					});
+				} catch (err) {
+					// Silent failure — user will see the normal generation when they reach the lesson.
+					console.warn('[VibeCheck] Lesson prefetch failed (non-fatal):', err);
+				}
+			})();
+		}
+
+		if (!questions || questions.length === 0) {
+			return null;
 		}
 
 		return {
@@ -254,7 +310,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	sidebar.setReviewStartHandler(async (): Promise<QuizSession | null> => {
 		const track = fsrs.getProgress().activeTrack;
-		const due = fsrs.dueCards(track);
+		const due = fsrs.dueCards();
 		if (due.length === 0) {
 			return null;
 		}
@@ -354,11 +410,11 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('vibeCheck.startReview', async () => {
 			telemetry.track('command.invoked', { command: 'vibeCheck.startReview' });
 			const track = fsrs.getProgress().activeTrack;
-			const due = fsrs.dueCards(track);
+			const due = fsrs.dueCards();
 			if (due.length === 0) {
 				telemetry.track('review.empty', { track });
 				vscode.window.showInformationMessage(
-					`Vibe Check: nothing due on the ${track} track.`
+					'Vibe Check: nothing due for review right now.'
 				);
 				return;
 			}

@@ -21,9 +21,10 @@ Built for **Google Antigravity, Cursor, Windsurf, VSCodium, VS Code**, and any o
 
 You ship code an agent wrote. A week later, it breaks. You can't fix it because you never understood it. Vibe Check makes that impossible.
 
-- An agent inserts >5 lines? **A 5-lesson module spawns automatically.**
-- You read each line, then prove it with closed-question quizzes.
-- Pass 4/5 to unlock the next lesson. Fail and you stay stuck — or skip with a streak hit.
+- An agent inserts >5 lines? **A multi-lesson module spawns automatically** — 2-5 lessons, sized to the chunk of code.
+- Auto-fired modules quiz the same code from multiple angles: what does it do, security implications, where it fits in the architecture, what tools it touches.
+- You read each line, then prove it with closed-question quizzes (multiple choice, fill-in-the-blank, drag-to-reorder).
+- Pass with ≥80% to unlock the next lesson. Fail and you stay stuck — or skip with a streak hit.
 - Questions you answered live in a spaced-repetition queue. Tomorrow Vibe Check asks you the trickiest ones again.
 
 No fluff, no free-text gotchas, no LLM grading you on vibes. Closed questions, deterministic grading, pixel-art mascot judging your every wrong answer.
@@ -87,15 +88,13 @@ code --install-extension vibe-check-X.Y.Z.vsix
 ## Quick start
 
 1. **Open the sidebar.** Click the 🎓 mortarboard icon in the activity bar.
-2. **Set your model provider.** Out of the box, Vibe Check tries to use GitHub Copilot (in VS Code) or Antigravity AI (in Antigravity). To use **Anthropic / OpenAI / Gemini / OpenRouter** directly:
-   - **`Ctrl/Cmd+Shift+P`** → `Vibe Check: Set API Key…` → pick provider → paste key
-   - **`Ctrl/Cmd+Shift+P`** → `Vibe Check: Switch Provider…` → pick the one you set
-   - **`Ctrl/Cmd+Shift+P`** → `Vibe Check: Select Model…` → pick a model from the live list
+2. **Set your model provider.** Run `Vibe Check: Configure Provider` from the Command Palette — guided wizard picks provider, prompts for API key (encrypted SecretStorage), and selects a model in one flow. In VS Code with Copilot active, `copilot` works with no API key.
 3. **Trigger a quiz.** Either let an AI agent insert >5 lines into your editor (the Pulse Observer auto-fires), or:
    - Click **+ NEW** in the sidebar header → pick a topic
    - Right-click code → **Vibe Check: Quiz Me On Selection**
-4. **Take the lesson.** Five questions. Pass with ≥80% to unlock the next.
-5. **Daily review.** Click **↻ START DUE REVIEW** when the button shows due cards.
+4. **Take the lesson.** 3-5 questions, sized to the chunk. Pass with ≥80% to unlock the next.
+5. **Use keyboard shortcuts** in lessons: `1` `2` `3` `4` to pick A/B/C/D, `Enter` to submit and to advance.
+6. **Daily review.** Click **↻ START DUE REVIEW** when due cards exist.
 
 ---
 
@@ -117,11 +116,11 @@ code --install-extension vibe-check-X.Y.Z.vsix
 - **Intermediate** — applied logic, predict outputs (10 XP)
 - **Expert** — architecture, edge cases, trade-offs (20 XP)
 
-Each track has its own modules, streak, XP, and review queue. Switch freely.
+Track is a **difficulty preference** — it controls how hard the LLM makes new lessons and how much XP each correct answer is worth. **XP, streak, daily progress, modules, and the review queue are shared across all three tracks** (since v0.1.1). Switch freely.
 
 ### Question types
 
-- **Multiple choice** — one prompt, four plausible options, one correct. Inline code preview shows the exact block being asked about
+- **Multiple choice** — one prompt, four plausible options, one correct. Inline code preview shows the exact block being asked about. Options are seeded-shuffled host-side so the correct answer is uniformly distributed across A/B/C/D
 - **Fill in the blank** — code shown with a highlighted gap, pick from four candidates what fills it correctly
 - **Code ordering** — shuffled lines you reorder via drag-and-drop, with a snap-to-place drop indicator
 
@@ -138,8 +137,16 @@ Got a question wrong? The default explanation is canonical and free. Click **? W
 ### XP, streaks, daily ring
 
 - Daily XP ring fills toward a 50-XP goal — work a little every day.
-- Per-track streak counts consecutive days you answered ≥1 question correctly.
-- Cross-device sync via VS Code Settings Sync — your XP follows you.
+- One shared streak counts consecutive days you answered ≥1 question correctly (any track).
+- **Streak freeze** ❄ — earn 1 freeze per 7-day streak (capped at 3). If you miss a day with a freeze, the streak is preserved automatically on your next review.
+- Cross-device sync via VS Code Settings Sync — your XP and streak follow you. Modules and review cards stay per-project (workspace-state).
+
+### Keyboard, shortcuts, and quality-of-life
+
+- Lessons: **`1`–`4`** picks A/B/C/D, **`Enter`** submits and advances.
+- **Thumbs up/down** on every question — anonymous feedback that helps tune prompts.
+- **Cancel-generation** button on the GENERATING overlay so you don't sit through a slow LLM call.
+- **Delete a module** ✕ on each card if you want to clean up without nuking your XP.
 
 ---
 
@@ -163,15 +170,18 @@ API keys are stored encrypted in VS Code SecretStorage — they never sync to Se
 
 | Command | Description |
 |---|---|
-| `Vibe Check: New Module...` | Open the topic picker to generate a fresh 5-lesson module |
+| `Vibe Check: New Module...` | Open the topic picker to generate a fresh module |
 | `Vibe Check: Quiz Me On Selection` | Generate a code module from your current editor selection |
-| `Vibe Check: Start Due Review` | Run FSRS-due questions on the active track |
-| `Vibe Check: Switch Track` | Change between beginner / intermediate / expert |
+| `Vibe Check: Start Due Review` | Run FSRS-due questions from this workspace |
+| `Vibe Check: Switch Track` | Change between beginner / intermediate / expert (difficulty preference) |
 | `Vibe Check: Reset Progress` | Wipe all XP, streaks, modules, and FSRS cards |
+| `Vibe Check: Configure Provider (Setup Wizard)...` | Single guided flow — pick provider, paste key, select model |
 | `Vibe Check: Switch Provider...` | Change which LLM backend Vibe Check uses |
 | `Vibe Check: Select Model...` | Pick a specific model from the active provider's catalog |
 | `Vibe Check: Set API Key...` | Save an API key for a direct provider (encrypted) |
 | `Vibe Check: Clear API Key...` | Wipe a stored API key |
+| `Vibe Check: Open Get Started Walkthrough` | Re-open the 5-step onboarding |
+| `Vibe Check: Telemetry Settings…` | Grant / deny / reset anonymous telemetry consent |
 
 ---
 
@@ -182,6 +192,8 @@ API keys are stored encrypted in VS Code SecretStorage — they never sync to Se
 | `vibeCheck.autoQuiz` | `true` | Auto-fire a quiz when the Pulse Observer detects a large AI insertion |
 | `vibeCheck.modelProvider` | `auto` | Which backend to use (`copilot`, `antigravity`, `anthropic`, `gemini`, `openai`, `openrouter`, or `auto`) |
 | `vibeCheck.<provider>Model` | `""` | Per-provider model override — leave empty for sensible defaults |
+| `vibeCheck.telemetry.enabled` | `null` | `null` = ask once on first run; `true` = anonymous telemetry on; `false` = off |
+| `vibeCheck.telemetry.endpoint` | `""` | Power user — point at your own Supabase ingest URL, or set to `disabled` to hard-block transport |
 
 Open the Settings UI and search "vibe check" to see them all with descriptions.
 
