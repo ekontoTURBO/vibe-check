@@ -4,6 +4,23 @@ All notable changes to Vibe Check are documented here.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0]
+
+### Added
+- **Anonymous, opt-in telemetry pipeline.** First-run prompt asks once, stored decision is honored thereafter. Toggle anytime via `Vibe Check: Telemetry Settings…` or `vibeCheck.telemetry.enabled`. Defaults to **off** until the user explicitly grants consent.
+  - Honors `vscode.env.isTelemetryEnabled` (host-level kill-switch) in addition to our own setting — works across VS Code, Antigravity, Cursor, Windsurf, VSCodium, code-server.
+  - Defensive event queue: batches every 30s or 20 events, persists to `globalState` (survives crashes), drops on overflow / network error (no retry-loop). All `track()` calls fire-and-forget so telemetry can never block or crash the extension.
+  - Sanitizer caps strings at 256 chars and drops anything that isn't a primitive — code, file paths, API keys cannot reach the wire even if a future event were misused.
+- **Cross-fork host detection.** New `EnvironmentDetector.host()` returns `vscode | antigravity | cursor | windsurf | vscodium | trae | theia | code-server | unknown`. Used by telemetry to slice metrics per fork in the dashboard.
+- **`PRIVACY.md`** with the complete event catalog, retention policy, and how to opt out / request data deletion.
+- **`Vibe Check: Telemetry Settings…`** command — quick-pick UI to grant / deny / reset consent or open the privacy policy.
+- **`vibeCheck.telemetry.endpoint` setting** for power users who want to point the extension at their own Supabase instance, or set `disabled` to hard-disable transport regardless of consent.
+
+### Changed
+- Consent prompt fires 2.5s after activation so it doesn't fight the welcome walkthrough.
+- `deactivate` now flushes the telemetry queue with a bounded timeout before VS Code shuts down the extension host.
+- Bumped to v0.1.0 to mark the first non-prerelease minor — the privacy contract is now durable.
+
 ## [0.0.6]
 
 ### Changed

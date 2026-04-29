@@ -191,7 +191,8 @@ Open the Settings UI and search "vibe check" to see them all with descriptions.
 
 - API keys are stored in **VS Code SecretStorage** (encrypted, never synced).
 - Code context sent to LLMs is bounded: 5 KB per file, 16 KB total per generation.
-- All telemetry is **local-only**. Your XP, streaks, and modules live in `globalState`. Nothing is sent to a Vibe Check server because there is no Vibe Check server.
+- Your XP, streaks, modules, and quizzes live in `globalState` / `workspaceState` on your machine.
+- **Anonymous telemetry is opt-in and asked once** on first activation. We collect only anonymous counts and timings (lessons completed, question types answered, latency per provider, errors). **No code, no file contents, no API keys, no personal info.** Full field-by-field disclosure in [PRIVACY.md](PRIVACY.md). Toggle anytime via `Vibe Check: Telemetry Settings…`. Honored alongside `telemetry.telemetryLevel`.
 
 ---
 

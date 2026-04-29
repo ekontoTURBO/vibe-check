@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { FSRSManager } from './FSRSManager';
 import { EnvironmentDetector } from './EnvironmentDetector';
 import { detectCapabilities } from './ContextGatherer';
+import { Telemetry } from './telemetry/Telemetry';
 import {
 	AnswerPayload,
 	ModuleSummary,
@@ -53,6 +54,9 @@ interface ActiveLesson {
 	session: QuizSession;
 	correctSoFar: number;
 	xpEarnedSoFar: number;
+	startedAt: number;
+	questionStartedAt: number;
+	questionAttempts: number;
 }
 
 export class SidebarView implements vscode.WebviewViewProvider {
@@ -78,7 +82,8 @@ export class SidebarView implements vscode.WebviewViewProvider {
 
 	constructor(
 		private readonly extensionUri: vscode.Uri,
-		private readonly fsrs: FSRSManager
+		private readonly fsrs: FSRSManager,
+		private readonly telemetry?: Telemetry
 	) {
 		this.decoration = vscode.window.createTextEditorDecorationType(buildGlowDecoration());
 	}
@@ -122,15 +127,45 @@ export class SidebarView implements vscode.WebviewViewProvider {
 			this.notifyError('Lesson not found.');
 			return;
 		}
+		const now = Date.now();
 		this.activeLesson = {
 			module: found?.module ?? this.makeReviewShim(session),
 			lesson: found?.lesson ?? this.makeReviewLessonShim(session),
 			session,
 			correctSoFar: 0,
 			xpEarnedSoFar: 0,
+			startedAt: now,
+			questionStartedAt: now,
+			questionAttempts: 0,
 		};
 		this.screen = { kind: 'lesson', moduleId: session.moduleId };
-		void this.glowQuestion(session.questions[session.currentIndex], false);
+		if (session.isReview) {
+			this.telemetry?.track('review.started', {
+				dueCount: session.questions.length,
+				track: session.track,
+			});
+		} else if (found) {
+			this.telemetry?.track('lesson.started', {
+				lessonIndex: found.lesson.index,
+				questionCount: session.questions.length,
+				track: session.track,
+				topic: session.topic,
+				isReview: false,
+			});
+		}
+		const firstQ = session.questions[session.currentIndex];
+		if (firstQ) {
+			this.telemetry?.track('question.shown', {
+				type: firstQ.type,
+				track: session.track,
+				topic: firstQ.topic,
+				lessonIndex: found?.lesson.index ?? 0,
+				questionIndex: session.currentIndex,
+				isReview: session.isReview,
+				hasCodeSnippet: !!firstQ.codeSnippet || !!firstQ.lineRange,
+			});
+		}
+		void this.glowQuestion(firstQ, false);
 		void this.pushState();
 		if (this.view) {
 			this.view.show?.(true);
@@ -177,9 +212,11 @@ export class SidebarView implements vscode.WebviewViewProvider {
 	private async onMessage(msg: ClientMessage): Promise<void> {
 		switch (msg.type) {
 			case 'ready':
+				this.telemetry?.track('sidebar.opened', {});
 				await this.pushState();
 				return;
 			case 'setTrack':
+				this.telemetry?.track('sidebar.button_clicked', { button: 'setTrack', screen: this.screen.kind });
 				if (this.trackChangeHandler) {
 					await this.trackChangeHandler(msg.track);
 				}
@@ -189,22 +226,36 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				await this.pushState();
 				return;
 			case 'openModule':
+				this.telemetry?.track('sidebar.button_clicked', { button: 'openModule', screen: this.screen.kind });
+				{
+					const m = this.fsrs.getModule(msg.moduleId);
+					if (m) {
+						this.telemetry?.track('module.opened', {
+							lessonsTotal: m.lessons.length,
+							lessonsCompleted: m.lessons.filter((l) => l.state === 'completed').length,
+						});
+					}
+				}
 				this.screen = { kind: 'path', moduleId: msg.moduleId };
 				await this.pushState();
 				return;
 			case 'closeModule':
+				this.telemetry?.track('sidebar.button_clicked', { button: 'closeModule', screen: this.screen.kind });
 				this.screen = { kind: 'home' };
 				await this.pushState();
 				return;
 			case 'openPicker':
+				this.telemetry?.track('sidebar.picker_opened', {});
 				this.screen = { kind: 'picker' };
 				await this.pushState();
 				return;
 			case 'closePicker':
+				this.telemetry?.track('sidebar.button_clicked', { button: 'closePicker', screen: this.screen.kind });
 				this.screen = { kind: 'home' };
 				await this.pushState();
 				return;
 			case 'newModule':
+				this.telemetry?.track('sidebar.button_clicked', { button: 'newModule', screen: this.screen.kind });
 				this.screen = { kind: 'home' };
 				await this.pushState();
 				if (this.generateHandler) {
@@ -212,6 +263,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				}
 				return;
 			case 'startLesson': {
+				this.telemetry?.track('sidebar.button_clicked', { button: 'startLesson', screen: this.screen.kind });
 				if (!this.lessonStartHandler) {
 					return;
 				}
@@ -222,6 +274,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				return;
 			}
 			case 'startReview': {
+				this.telemetry?.track('sidebar.button_clicked', { button: 'startReview', screen: this.screen.kind });
 				if (!this.reviewStartHandler) {
 					return;
 				}
@@ -234,10 +287,15 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				return;
 			}
 			case 'submitAnswer':
-				// Informational only — webview already shows feedback.
-				// FSRS write happens on finalizeQuestion.
+				if (this.activeLesson) {
+					this.activeLesson.questionAttempts++;
+				}
 				return;
 			case 'requestWrongFeedback': {
+				this.telemetry?.track('question.why_clicked', {
+					type: this.currentQuestionType() ?? 'unknown',
+					wasCorrect: false,
+				});
 				if (!this.wrongFeedbackHandler) {
 					return;
 				}
@@ -253,7 +311,10 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				return;
 			}
 			case 'tryAgain':
-				// No-op for FSRS. Webview already reset its local state.
+				this.telemetry?.track('question.tried_again', { type: this.currentQuestionType() ?? 'unknown' });
+				if (this.activeLesson) {
+					this.activeLesson.questionStartedAt = Date.now();
+				}
 				return;
 			case 'finalizeQuestion': {
 				if (!this.activeLesson) {
@@ -265,6 +326,19 @@ export class SidebarView implements vscode.WebviewViewProvider {
 						this.activeLesson.session.track
 					);
 				}
+				const session = this.activeLesson.session;
+				const q = session.questions.find((qq) => qq.id === msg.questionId);
+				if (q) {
+					this.telemetry?.track('question.answered', {
+						type: q.type,
+						track: session.track,
+						topic: q.topic,
+						correct: msg.outcome === 'correct',
+						durationMs: Date.now() - this.activeLesson.questionStartedAt,
+						attempts: Math.max(1, this.activeLesson.questionAttempts),
+						isReview: session.isReview,
+					});
+				}
 				if (this.finalizeHandler) {
 					await this.finalizeHandler(msg.questionId, msg.outcome);
 				}
@@ -273,15 +347,29 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				return;
 			}
 			case 'exitLesson':
+				if (this.activeLesson) {
+					const { lesson, session } = this.activeLesson;
+					this.telemetry?.track('lesson.exited', {
+						lessonIndex: lesson.index,
+						answeredCount: session.currentIndex,
+						totalQuestions: session.questions.length,
+					});
+				}
 				this.activeLesson = null;
 				this.screen = { kind: 'home' };
 				this.clearGlow();
 				await this.pushState();
 				return;
 			case 'revealLines':
+				this.telemetry?.track('question.code_show_clicked', {
+					type: this.currentQuestionType() ?? 'unknown',
+				});
 				await this.revealLines(msg.file, msg.startLine, msg.endLine);
 				return;
 			case 'revealSnippet':
+				this.telemetry?.track('question.code_ref_clicked', {
+					type: this.currentQuestionType() ?? 'unknown',
+				});
 				await this.revealSnippet(msg.snippet, msg.file);
 				return;
 			case 'openExternal': {
@@ -336,6 +424,26 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				passed = correct >= Math.ceil(total * 0.8);
 			}
 			const moduleId = this.activeLesson.module.id;
+			const durationMs = Date.now() - this.activeLesson.startedAt;
+			if (session.isReview) {
+				this.telemetry?.track('review.completed', {
+					cardsReviewed: total,
+					correct,
+					durationMs,
+					track: session.track,
+				});
+			} else {
+				this.telemetry?.track('lesson.completed', {
+					lessonIndex: this.activeLesson.lesson.index,
+					correct,
+					total,
+					passed,
+					track: session.track,
+					topic: session.topic,
+					durationMs,
+					isReview: false,
+				});
+			}
 			this.screen = {
 				kind: 'complete',
 				moduleId,
@@ -345,8 +453,28 @@ export class SidebarView implements vscode.WebviewViewProvider {
 			this.clearGlow();
 		} else {
 			session.currentIndex = next;
-			void this.glowQuestion(session.questions[next], false);
+			this.activeLesson.questionStartedAt = Date.now();
+			this.activeLesson.questionAttempts = 0;
+			const q = session.questions[next];
+			this.telemetry?.track('question.shown', {
+				type: q.type,
+				track: session.track,
+				topic: q.topic,
+				lessonIndex: this.activeLesson.lesson.index,
+				questionIndex: next,
+				isReview: session.isReview,
+				hasCodeSnippet: !!q.codeSnippet || !!q.lineRange,
+			});
+			void this.glowQuestion(q, false);
 		}
+	}
+
+	private currentQuestionType(): string | null {
+		const s = this.activeLesson?.session;
+		if (!s) {
+			return null;
+		}
+		return s.questions[s.currentIndex]?.type ?? null;
 	}
 
 	private async revealSnippet(snippet: string, hint?: string): Promise<void> {

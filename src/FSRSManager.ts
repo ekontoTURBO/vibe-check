@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { FSRS, fsrs, createEmptyCard, Rating, Card, Grade } from 'ts-fsrs';
+import { Telemetry } from './telemetry/Telemetry';
 import {
 	Module,
 	ModuleLesson,
@@ -50,7 +51,7 @@ interface SerializedStoredCard {
 export class FSRSManager {
 	private scheduler: FSRS;
 
-	constructor(private context: vscode.ExtensionContext) {
+	constructor(private context: vscode.ExtensionContext, private telemetry?: Telemetry) {
 		this.scheduler = fsrs();
 	}
 
@@ -190,6 +191,9 @@ export class FSRSManager {
 
 	async setActiveTrack(track: Track): Promise<ProgressState> {
 		const prev = this.getProgress();
+		if (prev.activeTrack !== track) {
+			this.telemetry?.track('track.switched', { from: prev.activeTrack, to: track });
+		}
 		const next: ProgressState = { ...prev, activeTrack: track };
 		await this.context.globalState.update(PROGRESS_KEY, next);
 		return next;
@@ -258,6 +262,20 @@ export class FSRSManager {
 			dailyXp: (dailyReset ? 0 : trackPrev.dailyXp) + xpDelta,
 			dailyXpDate: today,
 		};
+
+		// Streak transitions — fire BEFORE persisting so the dashboard can
+		// see the transition with the new value attached.
+		if (streak > trackPrev.streak) {
+			this.telemetry?.track('progress.streak_extended', { track, streakDays: streak });
+		} else if (streak === 0 && trackPrev.streak > 0) {
+			this.telemetry?.track('progress.streak_broken', { track, previousStreak: trackPrev.streak });
+		}
+
+		// Daily-goal crossing event — only emit on the transition.
+		const prevDaily = dailyReset ? 0 : trackPrev.dailyXp;
+		if (prevDaily < DAILY_GOAL && updatedTrack.dailyXp >= DAILY_GOAL) {
+			this.telemetry?.track('progress.daily_goal_met', { track, dailyXp: updatedTrack.dailyXp });
+		}
 
 		const next: ProgressState = {
 			...prev,

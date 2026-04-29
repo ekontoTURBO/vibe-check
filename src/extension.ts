@@ -11,6 +11,8 @@ import { ProviderRegistry } from './providers/registry';
 import { registerProviderCommands } from './providers/commands';
 import { PROVIDER_LABELS } from './providers/types';
 import { pickMixedTopics, sizeForContext } from './TeacherProvider';
+import { Telemetry } from './telemetry/Telemetry';
+import { maybePromptForConsent, showTelemetrySettings } from './telemetry/firstRun';
 import {
 	Question,
 	QuizSession,
@@ -24,7 +26,31 @@ const QUIZ_COOLDOWN_MS = 30_000;
 
 export function activate(context: vscode.ExtensionContext) {
 	const env = EnvironmentDetector.detect();
-	console.log(`[VibeCheck] Activated in ${env}`);
+	const host = EnvironmentDetector.host();
+	console.log(`[VibeCheck] Activated in ${env} (host=${host})`);
+
+	const telemetry = Telemetry.init(context);
+	const FIRST_RUN_KEY = 'vibeCheck.firstRunActivated.v1';
+	const isFirstRun = !context.globalState.get<boolean>(FIRST_RUN_KEY);
+	if (isFirstRun) {
+		void context.globalState.update(FIRST_RUN_KEY, true);
+	}
+	const lastActivationAt = context.globalState.get<number>('vibeCheck.lastActivationAt') ?? 0;
+	void context.globalState.update('vibeCheck.lastActivationAt', Date.now());
+	telemetry.track('extension.activated', {
+		firstRun: isFirstRun,
+		secondsSinceLastActivation: lastActivationAt
+			? Math.floor((Date.now() - lastActivationAt) / 1000)
+			: undefined,
+	});
+	telemetry.track('host.detected', { host, appName: vscode.env.appName ?? '' });
+
+	// Fire the consent prompt asynchronously after a short delay so it
+	// doesn't fight the welcome walkthrough for screen real-estate.
+	void (async () => {
+		await new Promise((r) => setTimeout(r, 2500));
+		await maybePromptForConsent(telemetry);
+	})();
 
 	const secrets = new ProviderSecrets(context);
 	const registry = new ProviderRegistry(secrets);
@@ -75,10 +101,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const llm = new LLMService(registry);
 	const teacher = new TeacherProvider(llm);
-	const fsrs = new FSRSManager(context);
+	const fsrs = new FSRSManager(context, telemetry);
 	const pulse = new PulseObserver();
 	const gatherer = new ContextGatherer();
-	const sidebar = new SidebarView(context.extensionUri, fsrs);
+	const sidebar = new SidebarView(context.extensionUri, fsrs, telemetry);
 
 	context.subscriptions.push(
 		llm,
@@ -110,11 +136,24 @@ export function activate(context: vscode.ExtensionContext) {
 		inFlight = true;
 		sidebar.setGenerating(true, topic);
 
+		const startedAt = Date.now();
 		try {
 			const ctx = await gatherer.gather(topic, opts);
 			const topicMix = opts?.mixed
 				? pickMixedTopics(sizeForContext(ctx.content.length).lessons)
 				: undefined;
+			const sizing = sizeForContext(ctx.content.length);
+			const source: 'manual' | 'auto-pulse' | 'selection' =
+				opts?.mixed ? 'auto-pulse' : opts?.explicitCode ? 'selection' : 'manual';
+			telemetry.track('module.generation_started', {
+				topic,
+				track,
+				source,
+				mixed: !!opts?.mixed,
+				contextChars: ctx.content.length,
+				lessonCount: sizing.lessons,
+				questionsPerLesson: sizing.questionsPerLesson,
+			});
 			const module = await teacher.generateModuleSkeleton({
 				topic,
 				track,
@@ -126,6 +165,12 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 			fsrs.addModule(module);
 			lastModuleAt = Date.now();
+			telemetry.track('module.generation_completed', {
+				topic,
+				track,
+				durationMs: Date.now() - startedAt,
+				lessons: module.lessons.length,
+			});
 			sidebar.openModule(module.id);
 			vscode.window.showInformationMessage(
 				`Vibe Check: created module "${module.title}" with ${module.lessons.length} lesson${module.lessons.length === 1 ? '' : 's'}.`
@@ -133,6 +178,18 @@ export function activate(context: vscode.ExtensionContext) {
 		} catch (err) {
 			const msg = (err as Error).message;
 			console.error('[VibeCheck] Module generation failed:', err);
+			let providerLabel = 'unknown';
+			try {
+				providerLabel = (await registry.resolveActive()).provider.id;
+			} catch {
+				// resolveActive can throw before any provider is configured — fine.
+			}
+			telemetry.track('module.generation_failed', {
+				topic,
+				track,
+				provider: providerLabel,
+				errorClass: (err as Error).constructor?.name ?? 'Error',
+			});
 			sidebar.notifyError(`Module generation failed: ${msg}`);
 			vscode.window.showWarningMessage(`Vibe Check: ${msg}`);
 		} finally {
@@ -262,6 +319,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		const cfg = vscode.workspace.getConfiguration('vibeCheck');
 		const autoQuiz = cfg.get<boolean>('autoQuiz', true);
+		telemetry.track('pulse.observed', { chars: charCount, lines: lineCount, autoQuiz });
 
 		if (!autoQuiz) {
 			const choice = await vscode.window.showInformationMessage(
@@ -269,10 +327,13 @@ export function activate(context: vscode.ExtensionContext) {
 				'Vibe Check Me',
 				'Later'
 			);
-			if (choice !== 'Vibe Check Me') {
+			const accepted = choice === 'Vibe Check Me';
+			telemetry.track('pulse.prompted', { chars: charCount, lines: lineCount, accepted });
+			if (!accepted) {
 				return;
 			}
 		} else {
+			telemetry.track('pulse.auto_fired', { chars: charCount, lines: lineCount });
 			vscode.window.setStatusBarMessage(
 				`$(mortar-board) Vibe Check: quizzing ${lineCount} lines…`,
 				6000
@@ -291,9 +352,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('vibeCheck.startReview', async () => {
+			telemetry.track('command.invoked', { command: 'vibeCheck.startReview' });
 			const track = fsrs.getProgress().activeTrack;
 			const due = fsrs.dueCards(track);
 			if (due.length === 0) {
+				telemetry.track('review.empty', { track });
 				vscode.window.showInformationMessage(
 					`Vibe Check: nothing due on the ${track} track.`
 				);
@@ -312,9 +375,11 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 		}),
 		vscode.commands.registerCommand('vibeCheck.newModule', async () => {
+			telemetry.track('command.invoked', { command: 'vibeCheck.newModule' });
 			sidebar.openPicker();
 		}),
 		vscode.commands.registerCommand('vibeCheck.quizSelection', async () => {
+			telemetry.track('command.invoked', { command: 'vibeCheck.quizSelection' });
 			const editor = vscode.window.activeTextEditor;
 			if (!editor || editor.selection.isEmpty) {
 				vscode.window.showInformationMessage(
@@ -333,6 +398,7 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 		}),
 		vscode.commands.registerCommand('vibeCheck.setTrack', async () => {
+			telemetry.track('command.invoked', { command: 'vibeCheck.setTrack' });
 			const choice = await vscode.window.showQuickPick(
 				TRACKS.map((t) => ({ label: t })),
 				{ placeHolder: 'Select your active track' }
@@ -344,6 +410,8 @@ export function activate(context: vscode.ExtensionContext) {
 			sidebar.refresh();
 		}),
 		vscode.commands.registerCommand('vibeCheck.openWalkthrough', async () => {
+			telemetry.track('command.invoked', { command: 'vibeCheck.openWalkthrough' });
+			telemetry.track('walkthrough.opened', { source: 'command' });
 			await vscode.commands.executeCommand(
 				'workbench.action.openWalkthrough',
 				'cognitra.vibe-check#vibeCheck.gettingStarted',
@@ -351,21 +419,33 @@ export function activate(context: vscode.ExtensionContext) {
 			);
 		}),
 		vscode.commands.registerCommand('vibeCheck.resetProgress', async () => {
+			telemetry.track('command.invoked', { command: 'vibeCheck.resetProgress' });
 			const choice = await vscode.window.showWarningMessage(
 				'Reset all Vibe Check progress (XP, streaks, modules, due cards)?',
 				{ modal: true },
 				'Reset'
 			);
 			if (choice === 'Reset') {
+				telemetry.track('progress.reset', {});
 				await fsrs.resetAll();
 				sidebar.refresh();
 				vscode.window.showInformationMessage('Vibe Check: progress reset.');
 			}
+		}),
+		vscode.commands.registerCommand('vibeCheck.toggleTelemetry', async () => {
+			telemetry.track('command.invoked', { command: 'vibeCheck.toggleTelemetry' });
+			await showTelemetrySettings(telemetry);
 		})
 	);
 }
 
-export function deactivate() {}
+export async function deactivate(): Promise<void> {
+	try {
+		await Telemetry.get().dispose();
+	} catch {
+		// Telemetry was never initialized — fine.
+	}
+}
 
 function sliceSnippet(doc: vscode.TextDocument, start: number, end: number): string {
 	const lastLine = doc.lineCount - 1;

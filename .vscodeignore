@@ -5,12 +5,15 @@ node_modules/**
 src/**
 handoff/**
 scripts/**
+supabase/**
 .claude/**
 .git/**
 .github/**
 .gitignore
 .gitattributes
 .yarnrc
+.env
+.env.*
 esbuild.js
 vsc-extension-quickstart.md
 DEVELOPMENT.md

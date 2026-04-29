@@ -7,6 +7,15 @@ import {
 	ProviderId,
 } from './types';
 import { ProviderRegistry } from './registry';
+import { Telemetry } from '../telemetry/Telemetry';
+
+function track(name: Parameters<Telemetry['track']>[0], props: object): void {
+	try {
+		Telemetry.get().track(name, props as Parameters<Telemetry['track']>[1]);
+	} catch {
+		/* telemetry not initialized — fine */
+	}
+}
 
 const CUSTOM_MODEL_PICK = '$(edit) Other…';
 
@@ -30,6 +39,7 @@ export function registerProviderCommands(
  * Replaces the old three-step "discover Set API Key, then Switch Provider, then Select Model" dance.
  */
 async function configureProvider(registry: ProviderRegistry): Promise<void> {
+	track('provider.configure_started', { from: 'wizard' });
 	// Step 1: pick provider
 	const providerItems: vscode.QuickPickItem[] = [
 		{
@@ -47,6 +57,7 @@ async function configureProvider(registry: ProviderRegistry): Promise<void> {
 		ignoreFocusOut: true,
 	});
 	if (!providerPick) {
+		track('provider.configure_canceled', { atStep: 'provider' });
 		return;
 	}
 	await vscode.workspace
@@ -54,6 +65,7 @@ async function configureProvider(registry: ProviderRegistry): Promise<void> {
 		.update('modelProvider', providerPick.label, vscode.ConfigurationTarget.Global);
 
 	if (providerPick.label === 'auto') {
+		track('provider.configure_completed', { provider: 'auto', model: '' });
 		vscode.window.showInformationMessage(
 			'Vibe Check: provider set to auto. Configure individual providers separately as needed.'
 		);
@@ -79,6 +91,7 @@ async function configureProvider(registry: ProviderRegistry): Promise<void> {
 			  )
 			: { value: 'replace' as const };
 		if (!action) {
+			track('provider.configure_canceled', { atStep: 'apiKey' });
 			return;
 		}
 		if (action.value === 'replace') {
@@ -92,9 +105,11 @@ async function configureProvider(registry: ProviderRegistry): Promise<void> {
 				validateInput: (v) => (v.trim().length < 8 ? 'That looks too short.' : undefined),
 			});
 			if (!key) {
+				track('provider.configure_canceled', { atStep: 'apiKey' });
 				return;
 			}
 			await registry.secrets.set(id, key.trim());
+			track('provider.api_key_set', { provider: id });
 		}
 	}
 
@@ -108,11 +123,14 @@ async function configureProvider(registry: ProviderRegistry): Promise<void> {
 		ignoreFocusOut: true,
 	});
 	if (!modelPick) {
+		track('provider.configure_canceled', { atStep: 'model' });
 		return;
 	}
 
 	let chosen: string;
+	let isCustom = false;
 	if (modelPick.label === CUSTOM_MODEL_PICK) {
+		isCustom = true;
 		const custom = await vscode.window.showInputBox({
 			title: `${PROVIDER_LABELS[id]} — custom model id`,
 			prompt: 'Enter the model id exactly as the provider expects it',
@@ -120,6 +138,7 @@ async function configureProvider(registry: ProviderRegistry): Promise<void> {
 			ignoreFocusOut: true,
 		});
 		if (!custom) {
+			track('provider.configure_canceled', { atStep: 'model' });
 			return;
 		}
 		chosen = custom.trim();
@@ -127,6 +146,8 @@ async function configureProvider(registry: ProviderRegistry): Promise<void> {
 		chosen = modelPick.label;
 	}
 	await registry.setModelFor(id, chosen);
+	track('provider.model_selected', { provider: id, model: chosen, isCustom });
+	track('provider.configure_completed', { provider: id, model: chosen });
 
 	vscode.window.showInformationMessage(
 		`Vibe Check: configured ${PROVIDER_LABELS[id]} with model ${chosen}. You're ready to go.`
@@ -154,6 +175,7 @@ async function setApiKey(registry: ProviderRegistry): Promise<void> {
 		return;
 	}
 	await registry.secrets.set(id, key.trim());
+	track('provider.api_key_set', { provider: id });
 	vscode.window.showInformationMessage(
 		`Vibe Check: ${PROVIDER_LABELS[id]} key saved. Use "Vibe Check: Switch Provider…" to activate it.`
 	);
@@ -165,6 +187,7 @@ async function clearApiKey(registry: ProviderRegistry): Promise<void> {
 		return;
 	}
 	await registry.secrets.clear(id);
+	track('provider.api_key_cleared', { provider: id });
 	vscode.window.showInformationMessage(`Vibe Check: cleared ${PROVIDER_LABELS[id]} key.`);
 }
 
@@ -186,9 +209,12 @@ async function switchProvider(registry: ProviderRegistry): Promise<void> {
 	if (!pick) {
 		return;
 	}
-	await vscode.workspace
-		.getConfiguration('vibeCheck')
-		.update('modelProvider', pick.label, vscode.ConfigurationTarget.Global);
+	const cfg = vscode.workspace.getConfiguration('vibeCheck');
+	const previous = cfg.get<string>('modelProvider', 'auto');
+	await cfg.update('modelProvider', pick.label, vscode.ConfigurationTarget.Global);
+	if (previous !== pick.label) {
+		track('provider.switched', { from: previous, to: pick.label });
+	}
 	vscode.window.showInformationMessage(`Vibe Check: provider set to ${pick.label}.`);
 }
 
@@ -225,7 +251,9 @@ async function selectModel(registry: ProviderRegistry): Promise<void> {
 	}
 
 	let chosen: string;
+	let isCustom = false;
 	if (pick.label === CUSTOM_MODEL_PICK) {
+		isCustom = true;
 		const custom = await vscode.window.showInputBox({
 			title: `${provider.label} — custom model id`,
 			prompt: 'Enter the model id exactly as the provider expects it',
@@ -241,6 +269,7 @@ async function selectModel(registry: ProviderRegistry): Promise<void> {
 	}
 
 	await registry.setModelFor(id, chosen);
+	track('provider.model_selected', { provider: id, model: chosen, isCustom });
 	vscode.window.showInformationMessage(
 		`Vibe Check: ${provider.label} model set to ${chosen}.`
 	);

@@ -2,7 +2,7 @@
   "name": "vibe-check",
   "displayName": "Vibe Check",
   "description": "Anti-vibe-coding mentor. When AI writes code for you, Vibe Check turns it into a Duolingo-style quiz so you actually understand it.",
-  "version": "0.0.6",
+  "version": "0.1.0",
   "publisher": "cognitra",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -102,6 +102,10 @@
       {
         "command": "vibeCheck.openWalkthrough",
         "title": "Vibe Check: Open Get Started Walkthrough"
+      },
+      {
+        "command": "vibeCheck.toggleTelemetry",
+        "title": "Vibe Check: Telemetry Settings…"
       }
     ],
     "menus": {
@@ -252,6 +256,27 @@
             "default": "",
             "order": 6,
             "markdownDescription": "Model override for **OpenRouter** (e.g. `anthropic/claude-sonnet-4-6`, browse the [model catalog](https://openrouter.ai/models)). Leave empty to use the default.\n\n🔑 **API key setup**: get a key at [openrouter.ai/keys](https://openrouter.ai/keys), then open the Command Palette (`Ctrl+Shift+P`) and run **`Vibe Check: Configure Provider`**. Your key is stored encrypted, never in this file.\n\n📌 *Don't paste your API key into this field — this field is for the **model id** only.*"
+          }
+        }
+      },
+      {
+        "title": "Vibe Check: Telemetry",
+        "order": 3,
+        "properties": {
+          "vibeCheck.telemetry.enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "default": null,
+            "order": 1,
+            "markdownDescription": "Send **anonymous** usage events to help improve Vibe Check. **No code, no file contents, no API keys, no personally identifiable information** ever leave your machine. See [PRIVACY.md](https://github.com/ekontoTURBO/vibe-check/blob/main/PRIVACY.md) for the full list of fields.\n\n- `null` (default): you'll be asked once on first activation\n- `true`: send anonymous events\n- `false`: never send anything\n\nVibe Check **also** honors VS Code's `telemetry.telemetryLevel` — if you have host telemetry off, no events are sent regardless of this setting."
+          },
+          "vibeCheck.telemetry.endpoint": {
+            "type": "string",
+            "default": "",
+            "order": 2,
+            "markdownDescription": "**Advanced.** Override the telemetry endpoint URL (Supabase REST endpoint). Leave empty to use the default. Set to `disabled` to hard-disable transport regardless of consent."
           }
         }
       }
