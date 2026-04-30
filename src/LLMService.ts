@@ -8,6 +8,12 @@ export interface LLMRequest {
 	maxTokens?: number;
 	/** Optional kind tag — used for telemetry to distinguish skeleton vs lesson vs explain calls. */
 	kind?: 'skeleton' | 'lesson' | 'explain';
+	/**
+	 * When true, instructs the underlying provider to emit strict JSON via
+	 * its native JSON mode (Gemini `responseMimeType`, OpenAI
+	 * `response_format`). Forwarded through to provider.complete().
+	 */
+	expectJson?: boolean;
 }
 
 export class LLMService {

@@ -46,7 +46,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
 			throw new Error(`${this.label} API key not set. Run "Vibe Check: Set API Key…".`);
 		}
 		const model = (opts?.model && opts.model.trim()) || this.defaultModel;
-		const body = {
+		const body: Record<string, unknown> = {
 			model,
 			max_tokens: req.maxTokens ?? 1024,
 			temperature: 0.7,
@@ -55,6 +55,14 @@ export class OpenAICompatibleProvider implements LLMProvider {
 				{ role: 'user', content: req.user },
 			],
 		};
+		if (req.expectJson) {
+			// OpenAI requires the prompt to mention "JSON" (it does — see
+			// TeacherProvider). With this set, the API will reject any output
+			// that isn't valid JSON and retry internally instead of returning
+			// fences/prose. OpenRouter passes this through to compatible
+			// upstream providers (OpenAI, Anthropic via OpenRouter, etc).
+			body.response_format = { type: 'json_object' };
+		}
 		const res = await fetch(`${this.baseUrl}/chat/completions`, {
 			method: 'POST',
 			headers: {

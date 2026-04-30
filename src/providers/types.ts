@@ -21,6 +21,14 @@ export interface LLMRequest {
 	system: string;
 	user: string;
 	maxTokens?: number;
+	/**
+	 * When true, instructs the provider to emit strict JSON. Providers that
+	 * support a native JSON mode (Gemini's `responseMimeType`, OpenAI's
+	 * `response_format`) will use it; others fall back to prompt-only JSON
+	 * coaxing. Set this for any call where `JSON.parse` will be called on
+	 * the response — eliminates markdown fences and prose prefixes.
+	 */
+	expectJson?: boolean;
 }
 
 export interface CompleteOptions {

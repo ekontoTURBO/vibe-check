@@ -144,7 +144,7 @@ export class TeacherProvider {
 			? this.buildMixedSkeletonSystemPrompt(lessonTopics, opts.track, size.lessons)
 			: this.buildSkeletonSystemPrompt(opts.topic, opts.track, size.lessons);
 		const user = this.buildContextPrompt(opts.contextLabel, opts.context);
-		const raw = await this.llm.complete({ system, user, maxTokens: 800 });
+		const raw = await this.llm.complete({ system, user, maxTokens: 800, expectJson: true });
 		const parsed = this.parseSkeleton(raw, size.lessons);
 
 		const moduleId = `mod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -209,7 +209,7 @@ Now write the personalized explanation of WHY their answer is wrong.`;
 			);
 			const user = this.buildContextPrompt(module.contextLabel, module.context);
 			const maxTokens = Math.min(2000, 350 + questionsPerLesson * 280);
-			const raw = await this.llm.complete({ system, user, maxTokens });
+			const raw = await this.llm.complete({ system, user, maxTokens, expectJson: true });
 			return this.parseQuestions(raw);
 		};
 
@@ -383,7 +383,14 @@ Generate now.`;
 	}
 
 	private parseSkeleton(raw: string, expectedLessons: number): ParsedSkeleton {
-		const obj = parseJsonObject(raw);
+		// Shape: { "title": "...", "lessons": [{title, objective}, ...] }
+		const obj = parseJsonObject(raw, (v) => {
+			if (!v || typeof v !== 'object') {
+				return false;
+			}
+			const r = v as Record<string, unknown>;
+			return Array.isArray(r.lessons) && r.lessons.length > 0;
+		});
 		const r = obj as Record<string, unknown>;
 		const title = typeof r.title === 'string' ? r.title : '';
 		const arr = Array.isArray(r.lessons) ? r.lessons : [];
@@ -411,7 +418,29 @@ Generate now.`;
 	}
 
 	private parseQuestions(raw: string): ParsedQuestion[] {
-		const obj = parseJsonObject(raw);
+		// Shape: { "questions": [{prompt, explanation, ...}, ...] }
+		// The validator filters out objects that DON'T have a `questions`
+		// array — so thinking/reasoning content with code snippets that
+		// happen to contain balanced `{...}` is correctly skipped.
+		const obj = parseJsonObject(raw, (v) => {
+			if (!v || typeof v !== 'object') {
+				return false;
+			}
+			const r = v as Record<string, unknown>;
+			if (Array.isArray(r.questions) && r.questions.length > 0) {
+				return true;
+			}
+			// Also accept a bare array of question-shaped objects (some
+			// providers lift the wrapper).
+			if (
+				Array.isArray(v) &&
+				v.length > 0 &&
+				typeof (v[0] as Record<string, unknown>)?.prompt === 'string'
+			) {
+				return true;
+			}
+			return false;
+		});
 		const r = obj as Record<string, unknown>;
 		const arr = Array.isArray(r.questions) ? r.questions : Array.isArray(obj) ? (obj as unknown[]) : [];
 		const out: ParsedQuestion[] = [];
@@ -620,73 +649,163 @@ function shuffleOptions(
 	return { options: reordered, correctIndex: reordered.indexOf(correctAnswer) };
 }
 
-function parseJsonObject(raw: string): unknown {
-	const cleaned = stripFences(raw).trim();
+/**
+ * Predicate the caller passes to assert "this is the JSON object I asked
+ * for". Returning true means accept; false means keep trying the next
+ * candidate. Used to distinguish "thinking with code that happens to be
+ * valid JSON" from "the actual answer object" without hard-coding which
+ * provider emits which.
+ */
+type ShapeValidator = (parsed: unknown) => boolean;
+
+function parseJsonObject(raw: string, validator: ShapeValidator = () => true): unknown {
+	const cleaned = stripFences(stripInvisibles(raw)).trim();
 	if (looksLikeRefusal(cleaned) && !cleaned.includes('{')) {
 		throw new Error(
 			"The model refused to generate questions for this context. This usually means the workspace is too small or generic. Try opening a richer file or selecting a specific code block, then run 'Quiz Me On Selection'."
 		);
 	}
 
-	// Strategy 1: balanced-brace scan — find the FIRST top-level '{...}' that parses.
-	// This survives narrative prefixes like "Sure! Here's the JSON: {...}" where a `{`
-	// might appear inside the prose before the real object starts.
-	const scanned = extractFirstJsonObject(cleaned);
-	if (scanned) {
-		try {
-			return JSON.parse(scanned);
-		} catch (err) {
-			// Strategy 2: tolerant re-parse — repair common LLM mistakes (unquoted keys,
-			// trailing commas, single-quoted strings) and try again.
-			const repaired = repairJson(scanned);
-			if (repaired !== scanned) {
-				try {
-					return JSON.parse(repaired);
-				} catch {
-					// fall through to error
-				}
-			}
-			console.error('[VibeCheck] JSON parse failed. Raw response:\n' + raw.slice(0, 2000));
-			throw new Error(
-				`JSON parse failed: ${(err as Error).message}. The model returned malformed JSON — see the developer console for the full response.`
-			);
+	// Walk every balanced `{...}` candidate in order. For each, try strict
+	// parse, then a tolerant repair-and-retry. The FIRST candidate that
+	// (a) parses AND (b) matches the caller's expected shape wins.
+	//
+	// This is the bulletproof part: it doesn't matter if the response is
+	// `<thinking with code that contains balanced braces>{actual answer}`
+	// from Gemini, or `<reasoning>{ans}` from o1, or `<safety prefix>{ans}`
+	// from any future model. As long as the actual answer is *somewhere*
+	// in the response and matches our shape, we find it.
+	const candidates = extractAllJsonObjects(cleaned);
+	let lastErr: Error | null = null;
+	let firstParseable: { parsed: unknown; source: string } | null = null;
+
+	for (const candidate of candidates) {
+		const parsed = tryParseAndRepair(candidate);
+		if (!parsed.ok) {
+			lastErr = parsed.err;
+			continue;
+		}
+		if (!firstParseable) {
+			firstParseable = { parsed: parsed.value, source: candidate };
+		}
+		if (validator(parsed.value)) {
+			return parsed.value;
 		}
 	}
 
-	// No balanced object found at all.
+	// Nothing matched the validator. If we DID find something parseable
+	// (just wrong shape), prefer returning that with a warning over
+	// throwing — old behavior compatibility for tests that don't pass a
+	// validator. Callers that pass a validator should reject themselves.
+	if (firstParseable && validator === undefined) {
+		return firstParseable.parsed;
+	}
+	if (firstParseable) {
+		// Caller passed a validator but no candidate matched. Most likely:
+		// the model emitted thinking-then-answer but the answer got cut off,
+		// OR the model wrapped the answer in an unexpected envelope.
+		console.error(
+			'[VibeCheck] Found JSON, but no candidate matched the expected shape.',
+			'\nFirst parseable candidate:\n' + firstParseable.source.slice(0, 500),
+			'\nRaw response (first 2000 chars):\n' + raw.slice(0, 2000)
+		);
+		throw new Error(
+			'The AI returned JSON, but not in the expected format. ' +
+				`Got: "${JSON.stringify(firstParseable.parsed).slice(0, 160)}…" — ` +
+				'this usually means the model is "thinking out loud" instead of answering. ' +
+				'Try a model with less reasoning overhead (e.g. `gemini-2.5-flash-lite`, `claude-haiku-4-5`, `gpt-5.4-mini`).'
+		);
+	}
+
+	// Nothing parsed at all.
+	if (lastErr) {
+		console.error('[VibeCheck] JSON parse failed. Raw response:\n' + raw.slice(0, 2000));
+		throw new Error(buildParseError(lastErr, raw));
+	}
 	if (looksLikeRefusal(cleaned)) {
 		throw new Error(
 			"The model refused to generate questions for this context. Try opening a richer file or selecting a specific code block, then run 'Quiz Me On Selection'."
 		);
 	}
 	console.error('[VibeCheck] No JSON object found in response. Raw:\n' + raw.slice(0, 2000));
-	throw new Error(`Response was not JSON. Got: ${cleaned.slice(0, 200)}`);
+	throw new Error(`Response was not JSON. Model returned: ${cleaned.slice(0, 200) || '(empty)'}`);
+}
+
+/** Best-effort parse with one auto-repair retry. Pure function. */
+function tryParseAndRepair(candidate: string):
+	| { ok: true; value: unknown }
+	| { ok: false; err: Error } {
+	try {
+		return { ok: true, value: JSON.parse(candidate) };
+	} catch (err) {
+		const repaired = repairJson(candidate);
+		if (repaired !== candidate) {
+			try {
+				return { ok: true, value: JSON.parse(repaired) };
+			} catch {
+				/* fall through */
+			}
+		}
+		return { ok: false, err: err as Error };
+	}
+}
+
+/** Build a parse-error message that surfaces a snippet of what the model actually said. */
+function buildParseError(err: Error, raw: string): string {
+	const snippet = raw.slice(0, 160).replace(/\s+/g, ' ').trim();
+	return (
+		`The AI returned something that wasn't valid JSON. ` +
+		`Parser said: "${err.message}". ` +
+		`Model output started with: "${snippet || '(empty)'}…" ` +
+		`This is a model issue, not Vibe Check — try a different model (e.g. ${'`'}gemini-2.5-flash-lite${'`'} for less thinking overhead, or switch provider).`
+	);
+}
+
+/** Strip Unicode BOM and zero-width characters that some models prefix. */
+function stripInvisibles(s: string): string {
+	return s.replace(/^[﻿​‌‍ ]+/, '');
 }
 
 /** Find the first top-level balanced-brace JSON object in `s`. Skips '{' inside strings. */
-function extractFirstJsonObject(s: string): string | null {
-	for (let i = 0; i < s.length; i++) {
+/**
+ * Find ALL balanced `{...}` objects in the input, in order. Tracks BOTH
+ * `"`-delimited and `'`-delimited strings so a `}` inside a single-quoted
+ * string doesn't close the object early (the actual bug that hit Gemini).
+ *
+ * Yields each candidate as a substring slice. Caller decides which ones
+ * to attempt to parse. Linear time over the whole input.
+ */
+function extractAllJsonObjects(s: string): string[] {
+	const out: string[] = [];
+	let i = 0;
+	while (i < s.length) {
 		if (s[i] !== '{') {
+			i++;
 			continue;
 		}
+		// Walk from this '{' looking for balanced close.
 		let depth = 0;
-		let inString = false;
+		let inString: '"' | "'" | null = null;
 		let escape = false;
+		let end = -1;
 		for (let j = i; j < s.length; j++) {
 			const c = s[j];
 			if (escape) {
 				escape = false;
 				continue;
 			}
-			if (c === '\\') {
+			if (c === '\\' && inString) {
 				escape = true;
 				continue;
 			}
-			if (c === '"') {
-				inString = !inString;
+			if (inString) {
+				if (c === inString) {
+					inString = null;
+				}
 				continue;
 			}
-			if (inString) {
+			if (c === '"' || c === "'") {
+				inString = c;
 				continue;
 			}
 			if (c === '{') {
@@ -694,25 +813,104 @@ function extractFirstJsonObject(s: string): string | null {
 			} else if (c === '}') {
 				depth--;
 				if (depth === 0) {
-					return s.slice(i, j + 1);
+					end = j;
+					break;
 				}
 			}
 		}
-		// Unbalanced from this '{' — try the next one.
+		if (end === -1) {
+			// Unbalanced from this '{' — advance past it and keep scanning.
+			i++;
+			continue;
+		}
+		out.push(s.slice(i, end + 1));
+		// Skip past this object so we look for SIBLING objects, not nested.
+		i = end + 1;
 	}
-	return null;
+	return out;
 }
 
 /** Best-effort repair of common LLM JSON mistakes. Conservative — only safe transforms. */
 function repairJson(s: string): string {
 	let out = s;
+	// Smart / curly quotes → ASCII. Some providers (Gemini in particular) lift
+	// these from prose context and they are NOT valid JSON.
+	out = out
+		.replace(/[“”„‟]/g, '"') // " " „ ‟
+		.replace(/[‘’‚‛]/g, "'"); // ' ' ‚ ‛
 	// Strip line/block comments that some models leave in (// ... or /* ... */).
 	out = out.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+	// Single-quoted string literals → double-quoted. Walk the string char by
+	// char so we don't touch single quotes inside double-quoted strings (which
+	// are legal JSON, e.g. "don't"). Within the converted string, escape any
+	// existing double-quotes.
+	out = convertSingleQuotedStrings(out);
 	// Trailing commas before } or ]
 	out = out.replace(/,(\s*[}\]])/g, '$1');
 	// Unquoted property names — e.g. {questions: [...]} → {"questions": [...]}
 	// Match `{` or `,` followed by whitespace + identifier + `:`. Only ASCII identifiers.
 	out = out.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3');
+	return out;
+}
+
+/**
+ * Convert single-quoted JSON string literals to double-quoted. Skips content
+ * inside existing double-quoted strings so apostrophes there are preserved.
+ */
+function convertSingleQuotedStrings(s: string): string {
+	let out = '';
+	let i = 0;
+	while (i < s.length) {
+		const c = s[i];
+		if (c === '"') {
+			// Skip over a double-quoted string verbatim (respecting escapes).
+			out += c;
+			i++;
+			while (i < s.length) {
+				const cc = s[i];
+				out += cc;
+				i++;
+				if (cc === '\\' && i < s.length) {
+					out += s[i];
+					i++;
+					continue;
+				}
+				if (cc === '"') {
+					break;
+				}
+			}
+			continue;
+		}
+		if (c === "'") {
+			// Convert this single-quoted run to double-quoted.
+			out += '"';
+			i++;
+			while (i < s.length) {
+				const cc = s[i];
+				if (cc === '\\' && i + 1 < s.length) {
+					out += cc + s[i + 1];
+					i += 2;
+					continue;
+				}
+				if (cc === '"') {
+					// Escape any literal double-quote that ended up inside.
+					out += '\\"';
+					i++;
+					continue;
+				}
+				if (cc === "'") {
+					out += '"';
+					i++;
+					break;
+				}
+				out += cc;
+				i++;
+			}
+			continue;
+		}
+		out += c;
+		i++;
+	}
 	return out;
 }
 

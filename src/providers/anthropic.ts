@@ -43,13 +43,30 @@ export class AnthropicProvider implements LLMProvider {
 		if (!res.ok) {
 			throw new Error(`Anthropic ${res.status}: ${await res.text().catch(() => res.statusText)}`);
 		}
-		const json = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+		const json = (await res.json()) as {
+			content?: Array<{ type: string; text?: string; thinking?: string }>;
+			stop_reason?: string;
+		};
+		// Filter to ONLY `type: text` blocks. This explicitly excludes
+		// `thinking` blocks (Claude 4.x extended thinking) and any future
+		// non-text block types. Mirrors the Gemini fix for `thought: true`.
 		const text = (json.content ?? [])
 			.filter((c) => c.type === 'text' && typeof c.text === 'string')
 			.map((c) => c.text!)
 			.join('');
 		if (!text) {
-			throw new Error('Anthropic response had no text content.');
+			const reason = json.stop_reason;
+			if (reason === 'max_tokens') {
+				throw new Error(
+					'Claude ran out of tokens before producing visible content (extended thinking may have consumed the budget). Try a non-thinking model like `claude-haiku-4-5`.'
+				);
+			}
+			if (reason === 'refusal') {
+				throw new Error(
+					'Claude refused to answer for this content. Try a different code selection or model.'
+				);
+			}
+			throw new Error(`Anthropic response had no text content (stop_reason: ${reason ?? 'unknown'}).`);
 		}
 		return text;
 	}
