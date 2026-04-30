@@ -198,7 +198,10 @@ export class ContextGatherer {
 		const sourceFile = await this.findRepresentativeSourceFile(folders[0].uri);
 		if (!sourceFile) {
 			throw new Error(
-				'No source files found in this workspace. Open any code file in the editor first.'
+				"Couldn't find a source file in this workspace to quiz on. " +
+					'Vibe Check looks for `.ts/.js/.py/.go/.rs/.java/...` files (skipping `node_modules`, `dist`, etc). ' +
+					'Try opening a code file in the editor — Vibe Check will use whatever you have open. ' +
+					"Or right-click selected code and choose 'Vibe Check: Quiz Me On Selection'."
 			);
 		}
 		return {
@@ -380,32 +383,77 @@ export class ContextGatherer {
 	private async findRepresentativeSourceFile(
 		root: vscode.Uri
 	): Promise<{ path: string; content: string } | null> {
-		const candidatesByDir = [
+		// Fast path: check the well-known top-level directories first. This
+		// is instant for projects with conventional layouts (src/, lib/,
+		// app/, source/, root) and avoids the recursive glob.
+		const fastDirs = [
 			vscode.Uri.joinPath(root, 'src'),
 			vscode.Uri.joinPath(root, 'lib'),
 			vscode.Uri.joinPath(root, 'app'),
 			vscode.Uri.joinPath(root, 'source'),
 			root,
 		];
-		for (const dir of candidatesByDir) {
-			try {
-				const entries = await vscode.workspace.fs.readDirectory(dir);
-				const files = entries
-					.filter(
-						([name, type]) =>
-							type === vscode.FileType.File && SOURCE_FILE_PATTERN.test(name)
-					)
-					.map(([name]) => name);
-				for (const name of files) {
-					const fileUri = vscode.Uri.joinPath(dir, name);
-					const content = await this.readFile(fileUri);
-					if (content && content.trim().length >= 100) {
-						return { path: fileUri.fsPath, content };
-					}
-				}
-			} catch {
-				// directory doesn't exist or unreadable, try next
+		for (const dir of fastDirs) {
+			const file = await this.firstSourceFileIn(dir);
+			if (file) {
+				return file;
 			}
+		}
+
+		// Slow path: recursive workspace glob. Catches monorepos, Next.js
+		// (`pages/`, `components/`, `app/api/`), Django (`apps/myapp/`),
+		// Rust workspaces (`crates/foo/src/`), Java (`src/main/java/...`),
+		// Go (`cmd/foo/`, `internal/...`), and anything else with sources
+		// nested deeper than the fast path checks. Respects the user's
+		// `files.exclude` setting and ignores the obvious junk directories.
+		try {
+			const include = new vscode.RelativePattern(
+				root,
+				'**/*.{ts,tsx,js,jsx,mjs,cjs,py,rs,go,java,kt,kts,cs,cpp,cc,cxx,c,h,hpp,rb,php,swift,dart,ex,exs,hs,scala,clj,lua,sh,bash,zsh}'
+			);
+			const exclude =
+				'**/{node_modules,dist,out,build,.next,.nuxt,.svelte-kit,.turbo,.cache,vendor,target,coverage,__pycache__,.venv,venv,env,bin,obj,.gradle,Pods,DerivedData}/**';
+			// 50 is enough to find SOMETHING substantive on any real project,
+			// but small enough that a slow filesystem doesn't make this hang.
+			const candidates = await vscode.workspace.findFiles(include, exclude, 50);
+			// Sort by depth (shallow first) — top-level files are usually more
+			// representative of the project than deeply-nested utilities.
+			const ranked = candidates
+				.map((uri) => ({ uri, depth: uri.path.split('/').length }))
+				.sort((a, b) => a.depth - b.depth);
+			for (const { uri } of ranked) {
+				const content = await this.readFile(uri);
+				if (content && content.trim().length >= 100) {
+					return { path: uri.fsPath, content };
+				}
+			}
+		} catch (err) {
+			console.warn('[VibeCheck] findFiles fallback failed:', err);
+		}
+
+		return null;
+	}
+
+	private async firstSourceFileIn(
+		dir: vscode.Uri
+	): Promise<{ path: string; content: string } | null> {
+		try {
+			const entries = await vscode.workspace.fs.readDirectory(dir);
+			const files = entries
+				.filter(
+					([name, type]) =>
+						type === vscode.FileType.File && SOURCE_FILE_PATTERN.test(name)
+				)
+				.map(([name]) => name);
+			for (const name of files) {
+				const fileUri = vscode.Uri.joinPath(dir, name);
+				const content = await this.readFile(fileUri);
+				if (content && content.trim().length >= 100) {
+					return { path: fileUri.fsPath, content };
+				}
+			}
+		} catch {
+			// directory doesn't exist or unreadable
 		}
 		return null;
 	}

@@ -4,6 +4,15 @@ All notable changes to Vibe Check are documented here.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3]
+
+### Fixed
+- **"No source files found in this workspace" on huge repos** — the file scanner only inspected the immediate contents of `src/`, `lib/`, `app/`, `source/`, and the workspace root, with no recursion. So projects with sources nested deeper (Next.js `pages/components/`, Django `apps/myapp/`, Rust workspace `crates/foo/src/`, Java/Kotlin `src/main/java/com/example/`, Go `cmd/foo/`, monorepos `packages/*/src/`, etc.) all returned `null` even when the workspace was clearly full of code. Now uses `vscode.workspace.findFiles` as a recursive fallback after the fast-path directory check, with sensible excludes (`node_modules`, `dist`, `out`, `build`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `vendor`, `target`, `coverage`, `__pycache__`, `.venv`, `bin`, `obj`, `.gradle`, `Pods`, `DerivedData`). Caps at 50 candidates and prefers shallow files over deep ones for representativeness
+- **Misleading "Open any code file in the editor first" error message** — replaced with a useful one that names the extensions Vibe Check looks for and points at `Quiz Me On Selection` as an alternative
+
+### Changed
+- **Sidebar module list now filters by the active difficulty track.** Switching from Beginner → Intermediate → Expert no longer shows every module across all three; each track shows only modules it generated. The shared model from v0.1.2 is preserved underneath (XP, streak, daily progress, and FSRS due cards stay user-level) — only the visible list filters. The difficulty chip on each module card stays as a per-module label
+
 ## [0.1.2]
 
 ### Added

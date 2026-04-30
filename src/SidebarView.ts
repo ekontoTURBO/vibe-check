@@ -731,7 +731,11 @@ export class SidebarView implements vscode.WebviewViewProvider {
 	private async pushState(): Promise<void> {
 		const progress = this.fsrs.getProgress();
 		const capabilities = await detectCapabilities();
-		const modules = this.fsrs.listModules();
+		// Filter modules by the active track so each track shows only its
+		// own modules in the sidebar. XP / streak / FSRS due cards remain
+		// shared user-level (the v0.1.2 design); this is just a visual
+		// filter on the list.
+		const modules = this.fsrs.listModules(progress.activeTrack);
 		const dueCount = this.fsrs.dueCards().length;
 		const userProgress = progress.progress;
 

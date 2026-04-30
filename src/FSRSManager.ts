@@ -80,9 +80,16 @@ export class FSRSManager {
 		return this.loadModules().find((m) => m.id === id);
 	}
 
-	/** Lists ALL modules in this workspace regardless of difficulty track. */
-	listModules(): ModuleSummary[] {
+	/**
+	 * Lists modules. With no argument, returns ALL modules in the workspace
+	 * regardless of difficulty track (used for analytics / debug). With a
+	 * track argument, returns only modules whose `track` matches —
+	 * the sidebar uses this so each track shows only its own modules,
+	 * even though XP / streak / FSRS due cards remain shared user-level.
+	 */
+	listModules(track?: Track): ModuleSummary[] {
 		return this.loadModules()
+			.filter((m) => track === undefined || m.track === track)
 			.sort((a, b) => b.createdAt - a.createdAt)
 			.map((m) => ({
 				id: m.id,
