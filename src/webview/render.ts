@@ -11,22 +11,35 @@ import { renderPicker } from './components/picker';
 import { renderPulse } from './components/pulse';
 import { renderFooter } from './components/footer';
 
-function generatingOverlay(state: ViewState): HTMLElement {
+/**
+ * Slim, NON-BLOCKING generation indicator. Renders as a strip at the top of the
+ * sidebar while a module is being built — the rest of the UI (modules, reviews,
+ * lessons) stays fully interactive underneath. Generation runs in the extension
+ * host, so the user can keep clicking around / taking quizzes while it works.
+ */
+function generatingBanner(state: ViewState): HTMLElement {
 	const label = state.generatingTopic
-		? `GENERATING ${state.generatingTopic.toUpperCase()} MODULE…`
-		: 'WORKING…';
+		? `Building ${state.generatingTopic} quiz…`
+		: 'Building quiz…';
 	return h(
 		'div',
-		{ className: 'vc-generating' },
-		glitch('think', 4),
-		h('div', { className: 'vc-generating__text' }, label),
+		{ className: 'vc-genbar anim-pop', role: 'status', 'aria-live': 'polite' },
+		h('div', { className: 'vc-genbar__icon' }, glitch('think', 2)),
+		h(
+			'div',
+			{ className: 'vc-genbar__body' },
+			h('div', { className: 'vc-genbar__title' }, label),
+			h('div', { className: 'vc-genbar__sub' }, 'Runs in the background — keep using Vibe Check.')
+		),
 		h(
 			'button',
 			{
-				className: 'pbtn pbtn--small pbtn--ghost',
+				className: 'vc-genbar__cancel',
+				title: 'Cancel generation',
+				'aria-label': 'Cancel generation',
 				on: { click: () => send({ type: 'cancelGeneration' }) },
 			},
-			'CANCEL'
+			'✕'
 		)
 	);
 }
@@ -50,9 +63,6 @@ function errorBanner(message: string): HTMLElement {
 }
 
 function renderScreenBody(state: ViewState): HTMLElement {
-	if (state.isGenerating) {
-		return generatingOverlay(state);
-	}
 	switch (state.screen.kind) {
 		case 'home':
 			return renderHome(state) ?? renderHome(state);
@@ -72,9 +82,6 @@ function renderScreenBody(state: ViewState): HTMLElement {
 }
 
 function showHeader(state: ViewState): boolean {
-	if (state.isGenerating) {
-		return true;
-	}
 	if (state.screen.kind === 'lesson') {
 		return false;
 	}
@@ -115,6 +122,12 @@ export function render(rootEl: HTMLElement, state: ViewState): void {
 
 	if (state.error) {
 		rootEl.appendChild(errorBanner(state.error));
+	}
+
+	// Non-blocking generation strip — shown above whatever screen is active so the
+	// user keeps full control of the UI while a quiz builds in the background.
+	if (state.isGenerating) {
+		rootEl.appendChild(generatingBanner(state));
 	}
 
 	if (state.pulse && state.screen.kind === 'home') {

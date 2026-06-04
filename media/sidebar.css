@@ -1086,10 +1086,6 @@ button { font-family: inherit; }
 	letter-spacing: 0.05em;
 }
 
-/* Cancel button on GENERATING overlay */
-.vc-generating { gap: 8px; }
-.vc-generating .pbtn { margin-top: 4px; }
-
 /* ===========================================================
    Feedback strip
    =========================================================== */
@@ -1321,25 +1317,68 @@ button { font-family: inherit; }
 
 .vc-pulse__actions { display: flex; gap: 8px; }
 
-/* ===========================================================
-   Generating overlay
-   =========================================================== */
-.vc-generating {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	padding: 32px 16px;
-	gap: 12px;
-}
-
-.vc-generating__text {
+/* Personalized greeting on the home screen */
+.vc-greeting {
+	margin: 10px 12px 2px;
 	font-family: var(--pixel);
 	font-size: 9px;
-	color: var(--vc-fg-dim);
 	letter-spacing: 0.04em;
-	text-align: center;
+	color: var(--vc-gold);
 }
+
+/* ===========================================================
+   Generating banner (non-blocking)
+   =========================================================== */
+.vc-genbar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 10px 12px;
+	padding: 8px 10px;
+	background: rgba(78,201,255,0.10);
+	box-shadow: inset 0 0 0 1px rgba(78,201,255,0.35);
+	border-radius: 4px;
+}
+
+.vc-genbar__icon {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	animation: vc-genbar-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes vc-genbar-pulse {
+	0%, 100% { opacity: 0.55; }
+	50% { opacity: 1; }
+}
+
+.vc-genbar__body { flex: 1 1 auto; min-width: 0; }
+
+.vc-genbar__title {
+	font-family: var(--pixel);
+	font-size: 9px;
+	color: var(--vc-cyan);
+	letter-spacing: 0.04em;
+}
+
+.vc-genbar__sub {
+	margin-top: 3px;
+	font-family: var(--mono);
+	font-size: 10px;
+	color: var(--vc-fg-dim);
+}
+
+.vc-genbar__cancel {
+	flex: 0 0 auto;
+	background: none;
+	border: none;
+	color: var(--vc-fg-dim);
+	cursor: pointer;
+	font-size: 12px;
+	padding: 2px 4px;
+	line-height: 1;
+}
+.vc-genbar__cancel:hover { color: var(--vc-fg); }
 
 .vc-error-banner {
 	margin: 12px;

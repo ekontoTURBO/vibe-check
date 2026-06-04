@@ -4,6 +4,21 @@ All notable changes to Vibe Check are documented here.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4]
+
+### Changed
+- **Generation is now manual by default.** `vibeCheck.autoQuiz` defaults to **off** — you create quizzes with the **+ NEW** button (no API tokens spent until you click). Auto-mode is fully opt-in.
+- **First-run onboarding** now asks your **name** (shown as a greeting in the sidebar) and, separately, whether to enable **auto-mode**. Turning auto-mode on — during onboarding *or* via the Settings UI — shows an explicit **token-burn warning** plus a frequency picker. Re-run anytime with **`Vibe Check: Run Setup`**.
+- **New `vibeCheck.autoQuizThrottleMinutes` setting** throttles how often auto-mode may fire (every insertion / hourly / 4h / daily) so hands-free mode can't quietly drain your tokens.
+- **Generation no longer blocks the UI.** The old full-screen "GENERATING" overlay is replaced with a slim background banner; the modules list, reviews, and lessons stay fully interactive while a quiz builds.
+
+### Fixed
+- **A failing provider no longer dead-ends you.** Previously, if your selected provider failed *at request time* (bad key, rate limit, model outage) generation just errored out — the fallback only triggered for *unconfigured* providers. `LLMService` now resolves an ordered list of available providers and automatically rolls over to the next one on a runtime failure, with one automatic retry on transient errors (HTTP 408/429/5xx, network blips). Only when **every** available provider fails do you see an error — and it now lists what was tried.
+- Empty model responses are treated as a failure (and trigger fallback) instead of surfacing as a confusing blank quiz.
+
+### Internal
+- Added a standalone Node unit-test suite (`npm run test:unit`) covering all provider request/response/error shapes, registry fallback ordering, the runtime-fallback + retry logic, and JSON / prompt-injection parsing resilience.
+
 ## [0.1.3]
 
 ### Fixed

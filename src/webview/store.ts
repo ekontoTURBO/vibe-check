@@ -27,6 +27,7 @@ const EMPTY_STATE: ViewState = {
 	pulse: null,
 	error: null,
 	feedback: null,
+	userName: null,
 };
 
 type Listener = (state: ViewState) => void;

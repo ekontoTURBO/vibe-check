@@ -84,9 +84,15 @@ export class SidebarView implements vscode.WebviewViewProvider {
 	constructor(
 		private readonly extensionUri: vscode.Uri,
 		private readonly fsrs: FSRSManager,
-		private readonly telemetry?: Telemetry
+		private readonly telemetry?: Telemetry,
+		private userName: string | null = null
 	) {
 		this.decoration = vscode.window.createTextEditorDecorationType(buildGlowDecoration());
+	}
+
+	setUserName(name: string | null): void {
+		this.userName = name && name.trim() ? name.trim() : null;
+		void this.pushState();
 	}
 
 	resolveWebviewView(view: vscode.WebviewView): void {
@@ -767,6 +773,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
 			pulse: this.pulse,
 			error: this.lastError,
 			feedback: null,
+			userName: this.userName,
 		};
 		this.post({ type: 'state', state });
 	}
@@ -998,6 +1005,7 @@ interface ViewStatePayload {
 	pulse: { chars: number; lines: number; when: number } | null;
 	error: string | null;
 	feedback: null;
+	userName: string | null;
 }
 
 type HostMessage =

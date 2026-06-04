@@ -89,6 +89,10 @@ export function renderHome(state: ViewState): HTMLElement {
 	const { modules, dueCount, capabilities } = state;
 	const noWorkspace = !capabilities.hasWorkspaceFolder && !capabilities.hasActiveEditor;
 
+	const greeting = state.userName
+		? h('div', { className: 'vc-greeting' }, `HEY ${state.userName.toUpperCase()} 👋`)
+		: null;
+
 	const head = h(
 		'div',
 		{ className: 'vc-list' },
@@ -123,7 +127,7 @@ export function renderHome(state: ViewState): HTMLElement {
 				{ className: 'vc-empty__msg' },
 				noWorkspace
 					? 'Open a file or workspace folder so Vibe Check has something to quiz on.'
-					: 'Hit '
+					: 'Click + NEW MODULE to turn the code in your editor into a quiz — nothing is generated (and no tokens spent) until you do.'
 			),
 			noWorkspace
 				? null
@@ -141,7 +145,7 @@ export function renderHome(state: ViewState): HTMLElement {
 						h(
 							'div',
 							{ className: 'vc-empty__hint' },
-							'…or let an AI agent insert >5 lines into the editor — Vibe Check auto-fires.'
+							'Manual by default — no tokens spent until you click. Prefer hands-free? Turn on auto-mode in Settings (it spends tokens automatically).'
 						)
 				  )
 		);
@@ -163,5 +167,5 @@ export function renderHome(state: ViewState): HTMLElement {
 		dueCount > 0 ? `↻ START DUE REVIEW (${dueCount})` : '↻ NOTHING DUE'
 	);
 
-	return h('div', null, head, body, h('div', { className: 'vc-bottom-bar' }, reviewBtn));
+	return h('div', null, greeting, head, body, h('div', { className: 'vc-bottom-bar' }, reviewBtn));
 }

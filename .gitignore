@@ -48,3 +48,6 @@ desktop.ini
 # Caches
 .eslintcache
 .cache/
+
+# Standalone unit-test build output
+out-unit/

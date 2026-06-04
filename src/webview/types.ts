@@ -92,6 +92,7 @@ export interface ViewState {
 	pulse: PulseInfo | null;
 	error: string | null;
 	feedback: FeedbackUiState | null;
+	userName: string | null;
 }
 
 export interface FeedbackUiState {

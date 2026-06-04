@@ -24,6 +24,9 @@ export type EventName =
 	// Setup / onboarding
 	| 'walkthrough.opened'
 	| 'walkthrough.fallback_toast_shown'
+	| 'onboarding.started'
+	| 'onboarding.completed'
+	| 'onboarding.auto_mode_enabled'
 	| 'provider.configure_started'
 	| 'provider.configure_completed'
 	| 'provider.configure_canceled'
@@ -114,6 +117,9 @@ export interface EventPropMap {
 
 	'walkthrough.opened': { source: 'first-run' | 'command' };
 	'walkthrough.fallback_toast_shown': Record<string, never>;
+	'onboarding.started': { trigger: 'first-run' | 'command' };
+	'onboarding.completed': { nameProvided: boolean; autoMode: boolean; throttleMinutes: number };
+	'onboarding.auto_mode_enabled': { trigger: 'onboarding' | 'settings' | 'command'; throttleMinutes: number };
 
 	'provider.configure_started': { from: 'wizard' | 'command' | 'walkthrough' };
 	'provider.configure_completed': { provider: string; model: string };

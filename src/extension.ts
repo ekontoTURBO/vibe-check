@@ -13,6 +13,7 @@ import { PROVIDER_LABELS } from './providers/types';
 import { pickMixedTopics, sizeForContext } from './TeacherProvider';
 import { Telemetry } from './telemetry/Telemetry';
 import { maybePromptForConsent, showTelemetrySettings } from './telemetry/firstRun';
+import { runFirstRunOnboarding, enableAutoModeFlow, getUserName } from './onboarding';
 import {
 	Question,
 	QuizSession,
@@ -66,16 +67,39 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	})();
 
-	// First-run welcome — open the Get Started walkthrough so the user sees a guided
-	// onboarding instead of having to discover the wizard via the command palette.
+	const llm = new LLMService(registry);
+	const teacher = new TeacherProvider(llm);
+	const fsrs = new FSRSManager(context, telemetry);
+	const pulse = new PulseObserver();
+	const gatherer = new ContextGatherer();
+	const sidebar = new SidebarView(context.extensionUri, fsrs, telemetry, getUserName(context));
+
+	// Guard so our own programmatic autoQuiz writes don't re-trigger the warning prompt.
+	let suppressAutoQuizWatcher = false;
+	let lastAutoQuiz = vscode.workspace.getConfiguration('vibeCheck').get<boolean>('autoQuiz', false);
+
+	// First-run flow: ask the user's name + auto-mode preference (default OFF, with a
+	// token-burn warning before enabling), THEN open the provider walkthrough. Runs
+	// asynchronously so it never holds up activation.
 	void (async () => {
+		// Let the workbench settle before throwing modals at the user.
+		await new Promise((r) => setTimeout(r, 1200));
+		try {
+			suppressAutoQuizWatcher = true;
+			await runFirstRunOnboarding(context);
+		} catch (err) {
+			console.warn('[VibeCheck] onboarding failed (non-fatal):', err);
+		} finally {
+			lastAutoQuiz = vscode.workspace.getConfiguration('vibeCheck').get<boolean>('autoQuiz', false);
+			suppressAutoQuizWatcher = false;
+		}
+		sidebar.setUserName(getUserName(context));
+
 		const FLAG_KEY = 'vibeCheck.welcomeShown.v2';
 		if (context.globalState.get<boolean>(FLAG_KEY)) {
 			return;
 		}
 		void context.globalState.update(FLAG_KEY, true);
-		// Wait briefly for the workbench to fully initialize before opening.
-		await new Promise((r) => setTimeout(r, 1200));
 		try {
 			await vscode.commands.executeCommand(
 				'workbench.action.openWalkthrough',
@@ -99,20 +123,36 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	})();
 
-	const llm = new LLMService(registry);
-	const teacher = new TeacherProvider(llm);
-	const fsrs = new FSRSManager(context, telemetry);
-	const pulse = new PulseObserver();
-	const gatherer = new ContextGatherer();
-	const sidebar = new SidebarView(context.extensionUri, fsrs, telemetry);
-
 	context.subscriptions.push(
 		llm,
 		pulse,
 		sidebar,
 		vscode.window.registerWebviewViewProvider(SidebarView.viewType, sidebar),
 		vscode.window.onDidChangeActiveTextEditor(() => sidebar.refresh()),
-		vscode.workspace.onDidChangeWorkspaceFolders(() => sidebar.refresh())
+		vscode.workspace.onDidChangeWorkspaceFolders(() => sidebar.refresh()),
+		// When the user flips Auto-quiz ON via the Settings UI, surface the token-burn
+		// warning + frequency picker — same flow as onboarding, so they can't enable it
+		// by accident without understanding the cost.
+		vscode.workspace.onDidChangeConfiguration((e) => {
+			if (!e.affectsConfiguration('vibeCheck.autoQuiz')) {
+				return;
+			}
+			const newVal = vscode.workspace
+				.getConfiguration('vibeCheck')
+				.get<boolean>('autoQuiz', false);
+			const turnedOn = newVal === true && lastAutoQuiz === false;
+			lastAutoQuiz = newVal;
+			if (suppressAutoQuizWatcher || !turnedOn) {
+				return;
+			}
+			suppressAutoQuizWatcher = true;
+			void enableAutoModeFlow(context, 'settings').finally(() => {
+				lastAutoQuiz = vscode.workspace
+					.getConfiguration('vibeCheck')
+					.get<boolean>('autoQuiz', false);
+				suppressAutoQuizWatcher = false;
+			});
+		})
 	);
 
 	let lastModuleAt = 0;
@@ -362,39 +402,39 @@ export function activate(context: vscode.ExtensionContext) {
 		if (inFlight) {
 			return;
 		}
-		if (Date.now() - lastModuleAt < QUIZ_COOLDOWN_MS) {
-			return;
-		}
 		if (ev.insertedText.trim().length < 40) {
 			return;
 		}
 
 		const lineCount = ev.insertedText.split('\n').length;
 		const charCount = ev.insertedText.length;
+		// Always show the non-blocking pulse card — it has a "VIBE CHECK ME" button so
+		// the user can generate manually whenever they like, without auto-mode spending tokens.
 		sidebar.notifyPulse({ chars: charCount, lines: lineCount });
 
 		const cfg = vscode.workspace.getConfiguration('vibeCheck');
-		const autoQuiz = cfg.get<boolean>('autoQuiz', true);
+		const autoQuiz = cfg.get<boolean>('autoQuiz', false);
 		telemetry.track('pulse.observed', { chars: charCount, lines: lineCount, autoQuiz });
 
+		// Manual is the base: when auto-mode is off we DON'T nag with a modal and we DON'T
+		// spend any tokens. The sidebar pulse card is the (free) invitation to generate.
 		if (!autoQuiz) {
-			const choice = await vscode.window.showInformationMessage(
-				`Vibe Check: AI just inserted ${lineCount} lines. Quiz yourself?`,
-				'Vibe Check Me',
-				'Later'
-			);
-			const accepted = choice === 'Vibe Check Me';
-			telemetry.track('pulse.prompted', { chars: charCount, lines: lineCount, accepted });
-			if (!accepted) {
-				return;
-			}
-		} else {
-			telemetry.track('pulse.auto_fired', { chars: charCount, lines: lineCount });
-			vscode.window.setStatusBarMessage(
-				`$(mortar-board) Vibe Check: quizzing ${lineCount} lines…`,
-				6000
-			);
+			return;
 		}
+
+		// Auto-mode is on — honour the configured throttle so we don't burn tokens on
+		// every insertion. Effective gap = max(hard cooldown, user's frequency setting).
+		const throttleMin = cfg.get<number>('autoQuizThrottleMinutes', 60);
+		const throttleMs = Math.max(QUIZ_COOLDOWN_MS, throttleMin * 60_000);
+		if (Date.now() - lastModuleAt < throttleMs) {
+			return;
+		}
+
+		telemetry.track('pulse.auto_fired', { chars: charCount, lines: lineCount });
+		vscode.window.setStatusBarMessage(
+			`$(mortar-board) Vibe Check: quizzing ${lineCount} lines…`,
+			6000
+		);
 
 		const codeSnippet = sliceSnippet(ev.document, ev.lineRange.start, ev.lineRange.end);
 		// Auto-fire = mix topic angles (code → security → architecture → tools → code-deep)
@@ -473,6 +513,20 @@ export function activate(context: vscode.ExtensionContext) {
 				'cognitra.vibe-check#vibeCheck.gettingStarted',
 				false
 			);
+		}),
+		vscode.commands.registerCommand('vibeCheck.runSetup', async () => {
+			telemetry.track('command.invoked', { command: 'vibeCheck.runSetup' });
+			suppressAutoQuizWatcher = true;
+			try {
+				await runFirstRunOnboarding(context, { force: true });
+			} finally {
+				lastAutoQuiz = vscode.workspace
+					.getConfiguration('vibeCheck')
+					.get<boolean>('autoQuiz', false);
+				suppressAutoQuizWatcher = false;
+			}
+			sidebar.setUserName(getUserName(context));
+			sidebar.refresh();
 		}),
 		vscode.commands.registerCommand('vibeCheck.resetProgress', async () => {
 			telemetry.track('command.invoked', { command: 'vibeCheck.resetProgress' });
