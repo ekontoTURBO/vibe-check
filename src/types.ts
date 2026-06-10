@@ -115,17 +115,6 @@ export interface UserProgress {
 	freezesAvailable?: number;
 }
 
-/** Legacy per-track shape kept for migration only. */
-export interface TrackProgress {
-	xp: number;
-	streak: number;
-	lastReviewDate: string | null;
-	totalAnswered: number;
-	totalCorrect: number;
-	dailyXp: number;
-	dailyXpDate: string | null;
-}
-
 export interface ProgressState {
 	progress: UserProgress;
 	activeTrack: Track;
@@ -160,40 +149,3 @@ export type AnswerPayload =
 	| { kind: 'multiple-choice'; choiceIndex: number }
 	| { kind: 'code-order'; sequence: string[] }
 	| { kind: 'fill-blank'; choiceIndex: number };
-
-export type WebviewMessage =
-	| { type: 'requestState' }
-	| { type: 'submitAnswer'; questionId: string; answer: AnswerPayload }
-	| { type: 'finalizeQuestion'; questionId: string; outcome: 'correct' | 'wrong' }
-	| { type: 'startLesson'; moduleId: string; lessonId: string }
-	| { type: 'startReview' }
-	| { type: 'generateModule'; topic: Topic }
-	| { type: 'setTrack'; track: Track }
-	| { type: 'glowQuestion'; questionId: string }
-	| { type: 'dismissSession' };
-
-export type ExtensionMessage =
-	| { type: 'state'; payload: SidebarState }
-	| {
-			type: 'feedback';
-			questionId: string;
-			correct: boolean;
-			explanation: string;
-			xpDelta: number;
-			correctAnswer: string;
-	  }
-	| { type: 'sessionStarted'; session: QuizSession }
-	| { type: 'sessionFinished'; passed: boolean; score: number; total: number }
-	| { type: 'moduleGenerating'; topic: Topic; track: Track }
-	| { type: 'lessonGenerating'; lessonId: string }
-	| { type: 'error'; message: string };
-
-export interface SidebarState {
-	progress: ProgressState;
-	activeSession: QuizSession | null;
-	modules: ModuleSummary[];
-	dueCount: number;
-	environment: Environment;
-	isGenerating: boolean;
-	capabilities: Capabilities;
-}

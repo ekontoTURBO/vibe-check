@@ -224,7 +224,27 @@ export function activate(context: vscode.ExtensionContext) {
 				// Discard the in-flight result — user backed out while the LLM was still thinking.
 				return;
 			}
+			// Generate lesson 1's questions while the overlay is still up, so the
+			// module opens instantly playable instead of hitting a second LLM wait
+			// on first click. Non-fatal — on failure the lazy path takes over.
+			try {
+				const firstLesson = module.lessons[0];
+				if (firstLesson) {
+					firstLesson.questions = await teacher.generateLessonQuestions(module, firstLesson);
+				}
+			} catch (err) {
+				console.warn('[VibeCheck] Lesson-1 pre-generation failed (will generate lazily):', err);
+			}
+			if (token.cancelled) {
+				return;
+			}
 			fsrs.addModule(module);
+			const firstLesson = module.lessons[0];
+			if (firstLesson?.questions?.length) {
+				// addModule persisted the questions inside the module; mirror them
+				// into the FSRS card pool the same way the lazy path does.
+				fsrs.saveLessonQuestions(module.id, firstLesson.id, firstLesson.questions);
+			}
 			lastModuleAt = Date.now();
 			telemetry.track('module.generation_completed', {
 				topic,
@@ -395,7 +415,13 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	sidebar.setFinalizeHandler(async (questionId, outcome) => {
-		await fsrs.grade(questionId, outcome === 'correct');
+		try {
+			await fsrs.grade(questionId, outcome === 'correct');
+		} catch (err) {
+			// Card can be gone mid-session (e.g. module deleted in another view).
+			// Grading failure must never break lesson advancement.
+			console.warn('[VibeCheck] grade failed (non-fatal):', err);
+		}
 	});
 
 	pulse.onPulse(async (ev: PulseEvent) => {
@@ -419,6 +445,13 @@ export function activate(context: vscode.ExtensionContext) {
 		// Manual is the base: when auto-mode is off we DON'T nag with a modal and we DON'T
 		// spend any tokens. The sidebar pulse card is the (free) invitation to generate.
 		if (!autoQuiz) {
+			return;
+		}
+
+		// Never auto-fire while a lesson is in progress — generating a module the
+		// user didn't ask for mid-question burns tokens and steals attention.
+		// The pulse card above still invites a manual generation afterwards.
+		if (sidebar.hasActiveSession()) {
 			return;
 		}
 

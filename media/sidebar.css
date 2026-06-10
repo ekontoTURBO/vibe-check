@@ -738,6 +738,17 @@ button { font-family: inherit; }
 	color: var(--vc-fg-dim);
 }
 
+.vc-combo-chip {
+	flex-shrink: 0;
+	font-family: var(--pixel);
+	font-size: 8px;
+	padding: 2px 5px;
+	color: var(--vc-flame);
+	background: rgba(255, 122, 41, 0.14);
+	box-shadow: inset 0 0 0 1px var(--vc-flame);
+	letter-spacing: 0.05em;
+}
+
 .vc-question {
 	display: flex;
 	flex-direction: column;
@@ -1193,6 +1204,26 @@ button { font-family: inherit; }
 	font-size: 10px;
 	color: var(--vc-flame);
 	letter-spacing: 0.04em;
+}
+
+.vc-complete__perfect {
+	padding: 5px 10px;
+	background: rgba(255, 215, 0, 0.12);
+	box-shadow: inset 0 0 0 1px var(--vc-gold);
+}
+
+.vc-complete__perfect-text {
+	font-family: var(--pixel);
+	font-size: 9px;
+	color: var(--vc-gold);
+	letter-spacing: 0.05em;
+}
+
+.vc-complete__goal-text {
+	font-family: var(--pixel);
+	font-size: 8px;
+	color: var(--vc-green);
+	letter-spacing: 0.05em;
 }
 
 .vc-confetti {

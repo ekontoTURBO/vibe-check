@@ -65,7 +65,7 @@ function errorBanner(message: string): HTMLElement {
 function renderScreenBody(state: ViewState): HTMLElement {
 	switch (state.screen.kind) {
 		case 'home':
-			return renderHome(state) ?? renderHome(state);
+			return renderHome(state);
 		case 'path': {
 			const path = renderPath(state);
 			return path ?? renderHome(state);

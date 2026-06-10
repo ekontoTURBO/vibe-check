@@ -46,6 +46,7 @@ export type EventName =
 	| 'lesson.started'
 	| 'lesson.exited'
 	| 'lesson.completed'
+	| 'lesson.perfect_bonus'
 
 	// Question lifecycle
 	| 'question.shown'
@@ -157,6 +158,7 @@ export interface EventPropMap {
 		durationMs: number;
 		isReview: boolean;
 	};
+	'lesson.perfect_bonus': { bonusXp: number; track: string };
 
 	'question.shown': {
 		type: 'multiple-choice' | 'code-order' | 'fill-blank';

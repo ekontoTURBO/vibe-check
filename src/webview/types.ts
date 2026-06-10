@@ -68,7 +68,16 @@ export type Screen =
 	| { kind: 'home' }
 	| { kind: 'path'; moduleId: string }
 	| { kind: 'lesson' }
-	| { kind: 'complete'; correct: number; total: number; xpEarned: number; passed: boolean }
+	| {
+			kind: 'complete';
+			correct: number;
+			total: number;
+			xpEarned: number;
+			passed: boolean;
+			perfectBonus: number;
+			hasNextLesson: boolean;
+			moduleComplete: boolean;
+	  }
 	| { kind: 'picker' };
 
 export interface PulseInfo {

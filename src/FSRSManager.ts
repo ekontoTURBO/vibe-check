@@ -68,6 +68,8 @@ export class FSRSManager {
 
 	constructor(private context: vscode.ExtensionContext, private telemetry?: Telemetry) {
 		this.scheduler = fsrs();
+		// Only sync user-level XP/streak across devices — not per-project quizzes.
+		this.context.globalState.setKeysForSync([PROGRESS_KEY]);
 	}
 
 	addModule(module: Module): void {
@@ -209,9 +211,11 @@ export class FSRSManager {
 		return { deleted: true, questionsRemoved: removedQuestionIds.size };
 	}
 
-	/** Returns ALL due cards regardless of difficulty track. */
+	/** Returns ALL due cards regardless of difficulty track, most-overdue first. */
 	dueCards(now = new Date()): StoredCard[] {
-		return this.loadCards().filter((c) => c.card.due.getTime() <= now.getTime());
+		return this.loadCards()
+			.filter((c) => c.card.due.getTime() <= now.getTime())
+			.sort((a, b) => a.card.due.getTime() - b.card.due.getTime());
 	}
 
 	getProgress(): ProgressState {
@@ -338,10 +342,9 @@ export class FSRSManager {
 				freezesConsumed = missed;
 				streak = correct ? streak + 1 : streak;
 			} else {
-				// Not enough freezes — streak breaks.
+				// Not enough freezes — streak breaks. Keep the freezes: burning
+				// them on a gap they couldn't plug would punish the user twice.
 				streak = correct ? 1 : 0;
-				freezesAvailable = Math.max(0, freezesAvailable - missed);
-				freezesConsumed = Math.min(freezesAvailable + missed, missed);
 			}
 		}
 
@@ -398,6 +401,37 @@ export class FSRSManager {
 		return next;
 	}
 
+	/**
+	 * Awards XP outside the per-question grading flow (e.g. perfect-lesson
+	 * bonus). Counts toward total and daily XP but never touches streak,
+	 * answer counters, or freeze accounting.
+	 */
+	async awardBonusXp(amount: number): Promise<ProgressState> {
+		const prev = this.getProgress();
+		if (amount <= 0) {
+			return prev;
+		}
+		const cur = prev.progress;
+		const today = dateKey(new Date());
+		const dailyReset = cur.dailyXpDate !== today;
+		const updated: UserProgress = {
+			...cur,
+			xp: cur.xp + amount,
+			dailyXp: (dailyReset ? 0 : cur.dailyXp) + amount,
+			dailyXpDate: today,
+		};
+		const prevDaily = dailyReset ? 0 : cur.dailyXp;
+		if (prevDaily < DAILY_GOAL && updated.dailyXp >= DAILY_GOAL) {
+			this.telemetry?.track('progress.daily_goal_met', {
+				track: prev.activeTrack,
+				dailyXp: updated.dailyXp,
+			});
+		}
+		const next: ProgressState = { ...prev, progress: updated };
+		await this.context.globalState.update(PROGRESS_KEY, next);
+		return next;
+	}
+
 	async resetAll(): Promise<void> {
 		// Per-project data
 		await this.context.workspaceState.update(CARDS_KEY, []);
@@ -436,8 +470,6 @@ export class FSRSManager {
 			},
 		}));
 		void this.context.workspaceState.update(CARDS_KEY, serialized);
-		// Only sync user-level XP/streak across devices — not per-project quizzes.
-		void this.context.globalState.setKeysForSync([PROGRESS_KEY]);
 	}
 }
 
@@ -466,8 +498,16 @@ function latestDate(dates: (string | null)[]): string | null {
 	return best;
 }
 
+/**
+ * YYYY-MM-DD in the user's LOCAL timezone. Using toISOString() here would
+ * flip the streak day at UTC midnight — someone in UTC+2 reviewing at 1am
+ * would get credited for "yesterday" and lose streaks incorrectly.
+ */
 function dateKey(d: Date): string {
-	return d.toISOString().slice(0, 10);
+	const y = d.getFullYear();
+	const m = String(d.getMonth() + 1).padStart(2, '0');
+	const day = String(d.getDate()).padStart(2, '0');
+	return `${y}-${m}-${day}`;
 }
 
 /**

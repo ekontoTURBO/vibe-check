@@ -10,8 +10,6 @@ interface AntigravityGlobal {
 	};
 }
 
-declare const antigravity: AntigravityGlobal | undefined;
-
 /**
  * Finer-grained host id used by telemetry to slice metrics per fork.
  * - `vscode`     — Microsoft VS Code or @vscode/test-electron

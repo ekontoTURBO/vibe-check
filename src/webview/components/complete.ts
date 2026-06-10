@@ -27,10 +27,11 @@ export function renderComplete(state: ViewState): HTMLElement | null {
 	if (state.screen.kind !== 'complete') {
 		return null;
 	}
-	const { correct, total, xpEarned, passed } = state.screen;
+	const { correct, total, xpEarned, passed, perfectBonus, hasNextLesson, moduleComplete } =
+		state.screen;
 
 	const confetti = passed
-		? Array.from({ length: 30 }, (_, i) => confettiPiece(i, 30))
+		? Array.from({ length: moduleComplete ? 60 : 30 }, (_, i) => confettiPiece(i, 30))
 		: [];
 
 	const stats = h(
@@ -60,6 +61,25 @@ export function renderComplete(state: ViewState): HTMLElement | null {
 		)
 	);
 
+	const perfectRow =
+		perfectBonus > 0
+			? h(
+					'div',
+					{ className: 'vc-complete__perfect anim-pop' },
+					h('span', { className: 'vc-complete__perfect-text' }, `★ PERFECT! +${perfectBonus} BONUS XP`)
+			  )
+			: null;
+
+	const dailyGoalMet =
+		passed && state.progress.dailyXp >= state.progress.dailyGoal && state.progress.dailyGoal > 0;
+	const goalRow = dailyGoalMet
+		? h(
+				'div',
+				{ className: 'vc-complete__goal' },
+				h('span', { className: 'vc-complete__goal-text' }, '◎ DAILY GOAL SMASHED')
+		  )
+		: null;
+
 	const streakRow =
 		passed && state.progress.streak > 0
 			? h(
@@ -73,6 +93,20 @@ export function renderComplete(state: ViewState): HTMLElement | null {
 					)
 			  )
 			: null;
+
+	const title = !passed
+		? 'KEEP\nTRYING'
+		: moduleComplete
+		? 'MODULE\nMASTERED!'
+		: 'LESSON\nCOMPLETE!';
+
+	const buttonLabel = !passed
+		? 'TRY AGAIN'
+		: hasNextLesson
+		? 'NEXT LESSON ▶'
+		: moduleComplete
+		? 'BACK TO MODULE ✓'
+		: 'CONTINUE ▶';
 
 	return h(
 		'div',
@@ -91,17 +125,20 @@ export function renderComplete(state: ViewState): HTMLElement | null {
 			{
 				className: `vc-complete__title vc-complete__title--${passed ? 'win' : 'fail'}`,
 			},
-			passed ? 'LESSON\nCOMPLETE!' : 'KEEP\nTRYING'
+			title
 		),
 		stats,
+		perfectRow,
 		streakRow,
+		goalRow,
 		h(
 			'button',
 			{
 				className: `pbtn ${passed ? 'pbtn--gold' : 'pbtn--red'} pbtn--block`,
+				'data-enter-default': 'true',
 				on: { click: () => send({ type: 'completeAcknowledged' }) },
 			},
-			passed ? 'NEXT LESSON ▶' : 'TRY AGAIN'
+			`${buttonLabel}  ⏎`
 		)
 	);
 }

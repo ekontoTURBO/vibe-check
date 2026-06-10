@@ -49,6 +49,20 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 	}
 });
 
+// Enter triggers the screen's default action (e.g. CONTINUE on the
+// complete screen). Lesson screens manage their own Enter handling and
+// never render a [data-enter-default] element, so the two can't collide.
+document.addEventListener('keydown', (ev) => {
+	if (ev.key !== 'Enter') {
+		return;
+	}
+	const btn = document.querySelector<HTMLButtonElement>('[data-enter-default]');
+	if (btn) {
+		ev.preventDefault();
+		btn.click();
+	}
+});
+
 send({ type: 'ready' });
 
 // Initial paint with empty state so the user sees something while host hydrates.

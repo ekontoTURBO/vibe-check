@@ -4,7 +4,7 @@ import { send } from '../api';
 import { store } from '../store';
 import { resetCurrentLessonSelection } from './lesson';
 import { renderPromptText } from '../promptText';
-import type { ActiveLessonState, FeedbackUiState, Question } from '../types';
+import type { FeedbackUiState, Question } from '../types';
 
 function rateButtons(questionId: string): HTMLElement {
 	let rated: 'up' | 'down' | null = null;
@@ -38,11 +38,7 @@ function rateButtons(questionId: string): HTMLElement {
 	return wrap;
 }
 
-export function renderFeedback(
-	fb: FeedbackUiState,
-	q: Question,
-	lesson: ActiveLessonState
-): HTMLElement {
+export function renderFeedback(fb: FeedbackUiState, q: Question): HTMLElement {
 	if (fb.correct) {
 		return h(
 			'div',
@@ -67,9 +63,10 @@ export function renderFeedback(
 				'button',
 				{
 					className: 'pbtn pbtn--green pbtn--small',
+					'data-action': 'advance',
 					on: {
 						click: () => {
-							finalizeAndAdvance(q, lesson, 'correct');
+							finalizeAndAdvance(q, 'correct');
 						},
 					},
 				},
@@ -136,6 +133,7 @@ export function renderFeedback(
 					'button',
 					{
 						className: 'pbtn pbtn--small',
+						'data-action': 'advance',
 						on: {
 							click: () => {
 								send({ type: 'tryAgain', questionId: q.id });
@@ -153,7 +151,7 @@ export function renderFeedback(
 						className: 'pbtn pbtn--ghost pbtn--small',
 						on: {
 							click: () => {
-								finalizeAndAdvance(q, lesson, 'wrong');
+								finalizeAndAdvance(q, 'wrong');
 							},
 						},
 					},
@@ -164,13 +162,8 @@ export function renderFeedback(
 	);
 }
 
-function finalizeAndAdvance(
-	q: Question,
-	lesson: ActiveLessonState,
-	outcome: 'correct' | 'wrong'
-): void {
+function finalizeAndAdvance(q: Question, outcome: 'correct' | 'wrong'): void {
 	send({ type: 'finalizeQuestion', questionId: q.id, outcome });
 	store.setFeedback(null);
 	resetCurrentLessonSelection();
-	void lesson;
 }

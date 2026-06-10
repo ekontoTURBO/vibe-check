@@ -144,8 +144,27 @@ export class TeacherProvider {
 			? this.buildMixedSkeletonSystemPrompt(lessonTopics, opts.track, size.lessons)
 			: this.buildSkeletonSystemPrompt(opts.topic, opts.track, size.lessons);
 		const user = this.buildContextPrompt(opts.contextLabel, opts.context);
-		const raw = await this.llm.complete({ system, user, maxTokens: 800, expectJson: true });
-		const parsed = this.parseSkeleton(raw, size.lessons);
+
+		const attempt = async (): Promise<ParsedSkeleton> => {
+			const raw = await this.llm.complete({
+				system,
+				user,
+				maxTokens: 800,
+				kind: 'skeleton',
+				expectJson: true,
+			});
+			return this.parseSkeleton(raw, size.lessons);
+		};
+
+		let parsed: ParsedSkeleton;
+		try {
+			parsed = await attempt();
+		} catch (err) {
+			// One automatic retry — skeleton parse failures are usually transient
+			// model noise, and failing here kills the whole module generation.
+			console.warn('[VibeCheck] Skeleton generation failed, retrying once:', err);
+			parsed = await attempt();
+		}
 
 		const moduleId = `mod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 		const lessons: ModuleLesson[] = parsed.lessons.map((l, i) => ({
@@ -190,7 +209,7 @@ Reference (canonical) explanation: ${question.explanation}
 
 Now write the personalized explanation of WHY their answer is wrong.`;
 
-		const reply = await this.llm.complete({ system, user, maxTokens: 250 });
+		const reply = await this.llm.complete({ system, user, maxTokens: 250, kind: 'explain' });
 		return reply.trim();
 	}
 
@@ -209,7 +228,7 @@ Now write the personalized explanation of WHY their answer is wrong.`;
 			);
 			const user = this.buildContextPrompt(module.contextLabel, module.context);
 			const maxTokens = Math.min(2000, 350 + questionsPerLesson * 280);
-			const raw = await this.llm.complete({ system, user, maxTokens, expectJson: true });
+			const raw = await this.llm.complete({ system, user, maxTokens, kind: 'lesson', expectJson: true });
 			return this.parseQuestions(raw);
 		};
 
@@ -404,7 +423,8 @@ Generate now.`;
 				lessons.push({ title: li.title, objective: li.objective });
 			}
 		}
-		const minLessons = Math.max(2, Math.min(expectedLessons, 2));
+		// A module always needs at least 2 lessons to be worth gating.
+		const minLessons = 2;
 		if (lessons.length < minLessons) {
 			throw new Error(`Module skeleton had ${lessons.length} valid lessons, need at least ${minLessons}`);
 		}
@@ -693,13 +713,7 @@ function parseJsonObject(raw: string, validator: ShapeValidator = () => true): u
 		}
 	}
 
-	// Nothing matched the validator. If we DID find something parseable
-	// (just wrong shape), prefer returning that with a warning over
-	// throwing — old behavior compatibility for tests that don't pass a
-	// validator. Callers that pass a validator should reject themselves.
-	if (firstParseable && validator === undefined) {
-		return firstParseable.parsed;
-	}
+	// Nothing matched the validator.
 	if (firstParseable) {
 		// Caller passed a validator but no candidate matched. Most likely:
 		// the model emitted thinking-then-answer but the answer got cut off,

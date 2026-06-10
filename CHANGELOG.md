@@ -4,6 +4,33 @@ All notable changes to Vibe Check are documented here.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0]
+
+The flow release — modules open instantly playable, lessons chain into each other, and mastery gets rewarded.
+
+### Added
+- **Instant-playable modules.** Lesson 1's questions are now generated as part of module creation (while the generation banner is showing), so the module opens ready to play — no second LLM wait on first click. Combined with the existing next-lesson prefetch, the whole module path now plays with zero visible generation gaps. Non-fatal: if pre-generation fails, the old lazy path takes over
+- **Next-lesson chaining.** The complete screen's **NEXT LESSON ▶** button now starts the next lesson directly (it's prefetched, so it's instant) instead of dumping you back at the module path. The path screen is still one tap away via EXIT. Press `Enter` to continue — the complete screen now has a keyboard default
+- **Perfect-lesson bonus** ★ — answer every question in a lesson correctly and earn +50% bonus XP, celebrated on the complete screen
+- **In-lesson combo meter** 🔥 — consecutive correct answers build a combo chip in the question header (x2, x3, …). Wrong answers reset it. Pure motivation juice; XP math is unchanged
+- **MODULE MASTERED state** — finishing the last lesson of a module gets its own title and double confetti
+- **Daily-goal celebration** — crossing the 50-XP daily goal is now called out on the complete screen
+- **Skeleton auto-retry** — module skeleton generation now retries once automatically on transient parse failures, same as lesson generation always did
+
+### Fixed
+- **`Enter` after a wrong answer no longer triggers the paid "? WHY" explanation.** The keyboard handler used a CSS-class selector that matched the WHY button; it now targets an explicit advance action (NEXT on correct, TRY AGAIN on wrong). No more accidental LLM calls from keyboard flow
+- **Streaks now use your local timezone.** Date keys were computed in UTC, so anyone east of Greenwich reviewing late evening (or west of it early morning) could get streak credit for the wrong day and lose streaks incorrectly
+- **Streak freezes are no longer burned when they can't save the streak.** Previously a 3-day gap with 1 freeze consumed the freeze AND broke the streak — double punishment. Freezes are now only spent when they actually plug the gap (telemetry reported phantom freeze consumption in that path too)
+- **Auto-mode never fires while a lesson is open**, and the pulse card never steals the screen mid-lesson — an agent inserting code no longer interrupts the question you're answering
+- **Review queue is now ordered by most-overdue first.** Previously `START DUE REVIEW` took the first 5 cards in insertion order, so chronically overdue cards could be starved forever
+- **Review XP display matched the wrong track.** The complete-screen XP total was computed from your active track while the actual award used each question's own track — mixed-track reviews showed incorrect totals
+- **Telemetry queue could wedge permanently.** A persistent server rejection (e.g. schema drift) kept the same batch at the front of the queue forever, silently dropping all new events at the cap. Now retries a failed batch exactly once, then drops it
+- **Lesson advancement can no longer be blocked by a grading error** (e.g. answering a question whose module was deleted mid-session)
+- **LLM telemetry now tags request kind correctly** (skeleton / lesson / explain) — previously everything was logged as `lesson`
+
+### Removed
+- Dead types (`WebviewMessage`, `ExtensionMessage`, `SidebarState`, `TrackProgress`), an unreachable parser branch, an unused ambient declaration, and a duplicated render expression
+
 ## [0.1.4]
 
 ### Changed

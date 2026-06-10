@@ -20,6 +20,13 @@ interface LocalSelection {
 
 let local: LocalSelection | null = null;
 
+/**
+ * In-lesson combo: consecutive correct answers. Resets on any wrong answer
+ * and when the lesson changes. Purely visual juice — XP math stays
+ * host-side — but it's the single strongest "one more question" pull.
+ */
+let combo = 0;
+
 function ensureLocal(q: Question): LocalSelection {
 	if (!local || local.questionId !== q.id) {
 		local = {
@@ -80,6 +87,9 @@ function questionHeader(lesson: ActiveLessonState): HTMLElement {
 					h('div', { className: 'fill', style: { width: `${pct}%` } })
 				)
 			),
+			combo >= 2
+				? h('span', { className: 'vc-combo-chip anim-pop' }, `🔥 x${combo}`)
+				: null,
 			h('span', { className: `vc-track-chip vc-track-chip--${track}` }, TRACK_LABEL[track]),
 			h('span', { className: 'vc-qheader__counter' }, `${q}/${total}`)
 		)
@@ -443,12 +453,18 @@ function isQuestionReady(q: Question): boolean {
 	return !!local?.order;
 }
 
-function submitCurrent(q: Question, lesson: ActiveLessonState): boolean {
+function submitCurrent(q: Question): boolean {
 	const r = checkAnswer(q);
 	if (!r.payload) {
 		return false;
 	}
-	const xpDelta = r.correct ? trackXp(lesson.track) : 0;
+	// XP follows the question's own track (matters in mixed-track reviews).
+	const xpDelta = r.correct ? trackXp(q.track) : 0;
+	if (r.correct) {
+		combo++;
+	} else {
+		combo = 0;
+	}
 	const correctText = correctAnswerText(q);
 	const fb: FeedbackUiState = {
 		questionId: q.id,
@@ -471,7 +487,7 @@ function submitCurrent(q: Question, lesson: ActiveLessonState): boolean {
 	return true;
 }
 
-function submitButton(q: Question, lesson: ActiveLessonState): HTMLElement {
+function submitButton(q: Question): HTMLElement {
 	const ready = isQuestionReady(q);
 	const label =
 		q.type === 'code-order'
@@ -489,7 +505,7 @@ function submitButton(q: Question, lesson: ActiveLessonState): HTMLElement {
 				disabled: !ready,
 				on: {
 					click: () => {
-						submitCurrent(q, lesson);
+						submitCurrent(q);
 					},
 				},
 			},
@@ -518,6 +534,7 @@ function correctAnswerText(q: Question): string {
 
 export function clearLessonLocalSelection(): void {
 	local = null;
+	combo = 0;
 	uninstallKeyHandler();
 }
 
@@ -539,7 +556,7 @@ function uninstallKeyHandler(): void {
  * 1-4 selects MC/fill-blank options. Enter submits when ready or advances after feedback.
  * Idempotent — safe to call on every render.
  */
-function installKeyHandler(q: Question, lesson: ActiveLessonState, hasFeedback: boolean): void {
+function installKeyHandler(q: Question, hasFeedback: boolean): void {
 	uninstallKeyHandler();
 	const handler = (ev: KeyboardEvent): void => {
 		// Don't interfere with text inputs (none in lesson currently, but defensive).
@@ -562,19 +579,23 @@ function installKeyHandler(q: Question, lesson: ActiveLessonState, hasFeedback: 
 				return;
 			}
 		}
-		// Enter: submit if ready and no feedback yet, else advance/next.
+		// Enter: submit if ready and no feedback yet, else advance.
 		if (ev.key === 'Enter') {
 			if (!hasFeedback) {
 				if (isQuestionReady(q)) {
 					ev.preventDefault();
-					submitCurrent(q, lesson);
+					submitCurrent(q);
 				}
 				return;
 			}
-			// In feedback state — Enter advances (NEXT or TRY AGAIN-style flow handled by feedback.ts).
+			// In feedback state — Enter clicks the explicit advance action only
+			// (NEXT on correct, TRY AGAIN on wrong). Never "? WHY": that fires a
+			// paid LLM call and was previously matched by a class-based selector.
 			ev.preventDefault();
-			const nextBtn = document.querySelector<HTMLButtonElement>('.vc-feedback .pbtn--green, .vc-feedback .pbtn--cyan');
-			nextBtn?.click();
+			const advanceBtn = document.querySelector<HTMLButtonElement>(
+				'.vc-feedback [data-action="advance"]'
+			);
+			advanceBtn?.click();
 		}
 	};
 	document.addEventListener('keydown', handler);
@@ -596,7 +617,7 @@ export function renderLessonScreen(state: ViewState): HTMLElement | null {
 
 	const fb = state.feedback && state.feedback.questionId === q.id ? state.feedback : null;
 
-	installKeyHandler(q, lesson, !!fb);
+	installKeyHandler(q, !!fb);
 
 	const body =
 		q.type === 'multiple-choice'
@@ -605,9 +626,7 @@ export function renderLessonScreen(state: ViewState): HTMLElement | null {
 			? renderFillBlank(q, fb)
 			: renderCodeOrder(q, fb);
 
-	const footer = fb
-		? renderFeedback(fb, q, lesson)
-		: submitButton(q, lesson);
+	const footer = fb ? renderFeedback(fb, q) : submitButton(q);
 
 	return h('div', null, questionHeader(lesson), body, footer);
 }

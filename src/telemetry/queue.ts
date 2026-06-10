@@ -38,6 +38,7 @@ export class TelemetryQueue {
 	private flushing = false;
 	private droppedSinceLastFlush = 0;
 	private overflowWarned = false;
+	private consecutiveSendFailures = 0;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -106,11 +107,19 @@ export class TelemetryQueue {
 				this.pending.splice(0, batch.length);
 				this.persistAsync();
 				this.overflowWarned = false;
+				this.consecutiveSendFailures = 0;
+			} else {
+				// Non-ok response — keep the batch for ONE retry on the next
+				// interval. A second consecutive failure means the server is
+				// rejecting us (RLS misconfig, schema drift); drop the batch so
+				// the queue doesn't wedge at MAX_QUEUE forever.
+				this.consecutiveSendFailures++;
+				if (this.consecutiveSendFailures >= 2) {
+					this.pending.splice(0, batch.length);
+					this.persistAsync();
+					this.consecutiveSendFailures = 0;
+				}
 			}
-			// On non-ok we keep the batch in pending so it's retried on the
-			// next interval — but only once. If a second flush also fails, we
-			// drop the batch so we don't loop forever on a permanent server
-			// error.
 		} catch {
 			// Network error — drop the batch silently. We do NOT retry-loop:
 			// flaky networks would otherwise keep the radio on.

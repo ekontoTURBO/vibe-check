@@ -45,7 +45,16 @@ export type WrongFeedbackHandler = (
 interface ScreenState {
 	kind: 'home' | 'path' | 'lesson' | 'complete' | 'picker';
 	moduleId?: string;
-	complete?: { correct: number; total: number; xpEarned: number; passed: boolean };
+	complete?: {
+		correct: number;
+		total: number;
+		xpEarned: number;
+		passed: boolean;
+		perfectBonus: number;
+		hasNextLesson: boolean;
+		nextLessonId?: string;
+		moduleComplete: boolean;
+	};
 }
 
 interface ActiveLesson {
@@ -207,8 +216,16 @@ export class SidebarView implements vscode.WebviewViewProvider {
 
 	notifyPulse(info: { chars: number; lines: number }): void {
 		this.pulse = { ...info, when: Date.now() };
-		this.screen = { kind: 'home' };
+		// Never yank the user out of an active lesson — the pulse banner shows
+		// on the home screen whenever they get back there.
+		if (!this.activeLesson) {
+			this.screen = { kind: 'home' };
+		}
 		void this.pushState();
+	}
+
+	hasActiveSession(): boolean {
+		return this.activeLesson !== null;
 	}
 
 	refresh(): void {
@@ -356,14 +373,15 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				if (!this.activeLesson) {
 					return;
 				}
-				if (msg.outcome === 'correct') {
-					this.activeLesson.correctSoFar++;
-					this.activeLesson.xpEarnedSoFar += this.trackXp(
-						this.activeLesson.session.track
-					);
-				}
 				const session = this.activeLesson.session;
 				const q = session.questions.find((qq) => qq.id === msg.questionId);
+				if (msg.outcome === 'correct') {
+					this.activeLesson.correctSoFar++;
+					// XP follows the QUESTION's track — in mixed-track review
+					// sessions, FSRSManager.grade() awards by question track, so
+					// the displayed total must match what's actually granted.
+					this.activeLesson.xpEarnedSoFar += this.trackXp(q?.track ?? session.track);
+				}
 				if (q) {
 					this.telemetry?.track('question.answered', {
 						type: q.type,
@@ -429,12 +447,23 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				this.lastError = null;
 				await this.pushState();
 				return;
-			case 'completeAcknowledged':
-				this.screen = this.screen.kind === 'complete' && this.screen.moduleId
-					? { kind: 'path', moduleId: this.screen.moduleId }
-					: { kind: 'home' };
+			case 'completeAcknowledged': {
+				const done = this.screen.kind === 'complete' ? this.screen : null;
+				const moduleId = done?.moduleId;
+				const c = done?.complete;
+				// Chain straight into the next lesson — it's usually prefetched,
+				// so this is instant. Falling back to the path screen otherwise.
+				if (moduleId && c?.passed && c.hasNextLesson && c.nextLessonId && this.lessonStartHandler) {
+					const session = await this.lessonStartHandler(moduleId, c.nextLessonId);
+					if (session) {
+						this.startSession(session);
+						return;
+					}
+				}
+				this.screen = moduleId ? { kind: 'path', moduleId } : { kind: 'home' };
 				await this.pushState();
 				return;
+			}
 		}
 	}
 
@@ -451,7 +480,10 @@ export class SidebarView implements vscode.WebviewViewProvider {
 		if (next >= session.questions.length) {
 			const total = session.questions.length;
 			const correct = this.activeLesson.correctSoFar;
-			const xpEarned = this.activeLesson.xpEarnedSoFar;
+			const finishedLessonIndex = this.activeLesson.lesson.index;
+			const moduleId = this.activeLesson.module.id;
+			const lessonStartedAt = this.activeLesson.startedAt;
+			let xpEarned = this.activeLesson.xpEarnedSoFar;
 			let passed = false;
 			if (this.sessionFinishHandler && !session.isReview) {
 				const res = await this.sessionFinishHandler(session, correct);
@@ -459,8 +491,20 @@ export class SidebarView implements vscode.WebviewViewProvider {
 			} else {
 				passed = correct >= Math.ceil(total * 0.8);
 			}
-			const moduleId = this.activeLesson.module.id;
-			const durationMs = Date.now() - this.activeLesson.startedAt;
+
+			// Perfect lesson → +50% bonus XP. Rewards mastery over scraping by.
+			let perfectBonus = 0;
+			if (passed && correct === total && total >= 2 && xpEarned > 0) {
+				perfectBonus = Math.round(xpEarned * 0.5);
+				await this.fsrs.awardBonusXp(perfectBonus);
+				xpEarned += perfectBonus;
+				this.telemetry?.track('lesson.perfect_bonus', {
+					bonusXp: perfectBonus,
+					track: session.track,
+				});
+			}
+
+			const durationMs = Date.now() - lessonStartedAt;
 			if (session.isReview) {
 				this.telemetry?.track('review.completed', {
 					cardsReviewed: total,
@@ -470,7 +514,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
 				});
 			} else {
 				this.telemetry?.track('lesson.completed', {
-					lessonIndex: this.activeLesson.lesson.index,
+					lessonIndex: finishedLessonIndex,
 					correct,
 					total,
 					passed,
@@ -480,10 +524,43 @@ export class SidebarView implements vscode.WebviewViewProvider {
 					isReview: false,
 				});
 			}
+
+			// Find the next playable lesson (recordLessonResult just unlocked it)
+			// so the complete screen can chain straight into it.
+			let hasNextLesson = false;
+			let nextLessonId: string | undefined;
+			let moduleComplete = false;
+			if (!session.isReview) {
+				const m = this.fsrs.getModule(moduleId);
+				if (m) {
+					const nextAvailable = m.lessons.find(
+						(l) => l.index > finishedLessonIndex && l.state === 'available'
+					);
+					hasNextLesson = passed && !!nextAvailable;
+					nextLessonId = nextAvailable?.id;
+					moduleComplete = m.lessons.every((l) => l.state === 'completed');
+					if (moduleComplete) {
+						this.telemetry?.track('module.completed', {
+							totalLessons: m.lessons.length,
+							totalQuestions: m.lessons.reduce((n, l) => n + (l.questions?.length ?? 0), 0),
+						});
+					}
+				}
+			}
+
 			this.screen = {
 				kind: 'complete',
 				moduleId,
-				complete: { correct, total, xpEarned, passed },
+				complete: {
+					correct,
+					total,
+					xpEarned,
+					passed,
+					perfectBonus,
+					hasNextLesson,
+					nextLessonId,
+					moduleComplete,
+				},
 			};
 			this.activeLesson = null;
 			this.clearGlow();
@@ -787,7 +864,15 @@ export class SidebarView implements vscode.WebviewViewProvider {
 			case 'lesson':
 				return { kind: 'lesson' };
 			case 'complete': {
-				const c = this.screen.complete ?? { correct: 0, total: 0, xpEarned: 0, passed: false };
+				const c = this.screen.complete ?? {
+					correct: 0,
+					total: 0,
+					xpEarned: 0,
+					passed: false,
+					perfectBonus: 0,
+					hasNextLesson: false,
+					moduleComplete: false,
+				};
 				return { kind: 'complete', ...c };
 			}
 			case 'picker':
@@ -987,7 +1072,18 @@ type ScreenPayload =
 	| { kind: 'home' }
 	| { kind: 'path'; moduleId: string }
 	| { kind: 'lesson' }
-	| { kind: 'complete'; correct: number; total: number; xpEarned: number; passed: boolean; moduleId?: string }
+	| {
+			kind: 'complete';
+			correct: number;
+			total: number;
+			xpEarned: number;
+			passed: boolean;
+			perfectBonus: number;
+			hasNextLesson: boolean;
+			nextLessonId?: string;
+			moduleComplete: boolean;
+			moduleId?: string;
+	  }
 	| { kind: 'picker' };
 
 interface ViewStatePayload {
